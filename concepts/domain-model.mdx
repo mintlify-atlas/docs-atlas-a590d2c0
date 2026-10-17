@@ -1,7 +1,7 @@
 ---
 title: "Domain Model: Entities and Relationships"
 sidebarTitle: "Domain Model"
-description: "Learn about the eight core domain entities in Raiz do Bem API — Beneficiario, PedidoAjuda, Dentista, Atendimento, Colaborador, Endereco, ProgramaSocial, and Especialidade."
+description: "Detailed reference for Raiz do Bem API's eight domain entities, their fields, associations, and the triage-to-appointment lifecycle they model together."
 ---
 
 The Raiz do Bem API models the entire lifecycle of dental care assistance for vulnerable populations through eight tightly related JPA entities. A help request (`PedidoAjuda`) is the entry point submitted publicly by the applicant; once triaged and approved, it produces a `Beneficiario` who is enrolled in a `ProgramaSocial`. An `Atendimento` (appointment) then connects that beneficiary to a volunteer `Dentista`, and the whole process is supervised by an authenticated `Colaborador`. Cross-cutting concerns like geolocation are handled by the `Endereco` entity, while `Especialidade` captures the dental specialties that qualify each dentist for specific programs.
@@ -23,7 +23,7 @@ The Raiz do Bem API models the entire lifecycle of dental care assistance for vu
 
 The primary business flow follows a chain of associations:
 
-```
+```text
 PedidoAjuda ──(approved)──► Beneficiario ──► Atendimento ──► Dentista
                 │                │                               │
                 └── Endereco     └── ProgramaSocial              └── Especialidade[]

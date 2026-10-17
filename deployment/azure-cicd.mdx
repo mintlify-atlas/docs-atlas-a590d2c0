@@ -1,7 +1,7 @@
 ---
 title: "Deploy Raiz do Bem API to Azure App Service via Pipelines"
 sidebarTitle: "Azure CI/CD"
-description: "Automate build, test, and deployment of the Raiz do Bem API to Azure App Service using the included Azure Pipelines configuration on the main and develop branches."
+description: "Automate build, test, and deployment of the Raiz do Bem API to Azure App Service using Azure Pipelines on the main and develop branches."
 ---
 
 The Raiz do Bem API includes a production-grade CI/CD pipeline defined in `azure-pipelines.yml` at the root of the repository. Every push to the `main` or `develop` branches automatically triggers a full pipeline run: the Maven build compiles the source with Java 21, executes all 285 unit tests, packages the application as a Quarkus fast-jar, and deploys the artifact to the **`raizdobem-backend`** Azure App Service (Linux, Java 21 SE, Canada Central region) using the `AzureWebApp@1` task. The only manual step required is configuring the four secret environment variables in Azure App Service → Configuration before the first deployment.

@@ -1,5 +1,5 @@
 ---
-title: "Collaborators API: Manage NGO Staff Accounts"
+title: "Collaborators API: Manage NGO Staff Accounts in Raiz"
 sidebarTitle: "Colaboradores"
 description: "CRUD endpoints for NGO collaborators — create with Bcrypt-hashed passwords, list paginated, look up by CPF, update email, and delete accounts."
 ---
@@ -26,12 +26,12 @@ Creates a new NGO collaborator account. **Requires `ADMIN` role.** The `senha` f
   Full name of the collaborator. Must not be blank.
 </ParamField>
 
-<ParamField body="dataNascimento" type="string (date)">
-  Date of birth in `YYYY-MM-DD` format (e.g. `"1990-05-20"`).
+<ParamField body="dataNascimento" type="string (date)" required>
+  Date of birth in `YYYY-MM-DD` format (e.g. `"1990-05-20"`). Must not be null and must not be a future date.
 </ParamField>
 
-<ParamField body="dataContratacao" type="string (date)">
-  Hire date in `YYYY-MM-DD` format (e.g. `"2024-01-15"`).
+<ParamField body="dataContratacao" type="string (date)" required>
+  Hire date in `YYYY-MM-DD` format (e.g. `"2024-01-15"`). Must not be null and must not be a future date.
 </ParamField>
 
 <ParamField body="email" type="string">

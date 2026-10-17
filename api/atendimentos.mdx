@@ -261,7 +261,7 @@ curl -X GET https://api.raizdobem.com.br/atendimento/exportarCsv \
 
 ### Response headers
 
-```
+```http
 Content-Type: text/csv; charset=UTF-8
 Content-Disposition: attachment; filename="Atendimentos_20240115_103000.csv"
 ```
@@ -271,5 +271,39 @@ Content-Disposition: attachment; filename="Atendimentos_20240115_103000.csv"
 | Code | Meaning |
 |------|---------|
 | `200 OK` | CSV file returned in response body. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Caller does not have the `ADMIN` role. |
+
+---
+
+## DELETE /atendimento/{id}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>DELETE</span>
+  <code>/atendimento/{"{id}"}</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Permanently removes an appointment record by its numeric ID. Returns `204 No Content` on success. If no appointment with that ID exists, a `NaoEncontradoException` is thrown and `404 Not Found` is returned.
+
+### Path parameters
+
+<ParamField path="id" type="integer" required>
+  Internal numeric ID of the appointment to delete.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X DELETE https://api.raizdobem.com.br/atendimento/5 \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `204 No Content` | Appointment successfully deleted. |
+| `404 Not Found` | No appointment with that ID exists. |
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Caller does not have the `ADMIN` role. |

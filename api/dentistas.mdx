@@ -293,7 +293,7 @@ curl -X GET https://api.raizdobem.com.br/dentista/exportarCsv \
 
 ### Response headers
 
-```
+```http
 Content-Type: text/csv; charset=UTF-8
 Content-Disposition: attachment; filename="Dentistas_20240115_103000.csv"
 ```
@@ -372,3 +372,37 @@ curl -X PUT https://api.raizdobem.com.br/dentista/98765432100 \
 | `401 Unauthorized` | Missing or invalid JWT. |
 | `403 Forbidden` | Role lacks permission. |
 | `404 Not Found` | Dentist with that CPF does not exist. |
+
+---
+
+## DELETE /dentista/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>DELETE</span>
+  <code>/dentista/{"{cpf}"}</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Permanently removes a dentist record from the system. Returns `204 No Content` on success. If the CPF is not found, a `NaoEncontradoException` is thrown and `404 Not Found` is returned.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the dentist to delete (digits only).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X DELETE https://api.raizdobem.com.br/dentista/98765432100 \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `204 No Content` | Dentist successfully deleted. |
+| `404 Not Found` | No dentist with that CPF exists. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Caller does not have the `ADMIN` role. |

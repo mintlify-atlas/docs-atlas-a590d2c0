@@ -1,5 +1,5 @@
 ---
-title: "Authentication API: JWT Token Endpoints"
+title: "Authentication: Obtain and Refresh JWT Access Tokens"
 sidebarTitle: "Authentication"
 description: "POST /auth/tokenAcesso issues RSA-256 JWT access and refresh tokens. POST /auth/refreshToken renews the session without re-submitting credentials."
 ---
@@ -140,7 +140,7 @@ curl -X GET https://api.raizdobem.com.br/beneficiario \
 
 The access token is a standard three-part JWT:
 
-```
+```text
 <base64url-header>.<base64url-payload>.<base64url-signature>
 ```
 

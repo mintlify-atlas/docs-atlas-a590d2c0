@@ -1,7 +1,7 @@
 ---
 title: "Raiz do Bem API Layered Architecture"
 sidebarTitle: "Architecture"
-description: "Explore the four-layer architecture of Raiz do Bem API: Resource, Service, Repository, and External Clients, with CDI scopes, caching, and exception handling."
+description: "Explore Raiz do Bem API's four-layer architecture: Resource, Service, Repository, and External Clients, with CDI scopes, caching, and exception handling."
 ---
 
 The Raiz do Bem API is structured around a strict **Layered Architecture** that enforces high cohesion and low coupling across the entire codebase. Each layer has a single, well-defined responsibility: the Resource layer owns the HTTP contract, the Service layer enforces business rules, the Repository layer handles persistence through Panache ORM, and the External Clients layer isolates third-party integrations behind MicroProfile REST Client interfaces. This design guarantees that no infrastructure detail leaks upward and that each layer can be tested, replaced, or scaled independently.
@@ -142,9 +142,9 @@ The five named caches in use are:
 |:---|:---|
 | `beneficiarios` | `BeneficiarioService` |
 | `dentistas` | `DentistaService` |
-| `atendimento` | `AtendimentoService` |
-| `pedido-ajuda` | `PedidoAjudaService` |
-| `colaborador` | `ColaboradorService` |
+| `atendimentos` | `AtendimentoService` |
+| `pedidos` | `PedidoAjudaService` |
+| `colaboradores` | `ColaboradorService` |
 
 <Tip>
   Because `@CacheInvalidateAll` is applied to every mutating operation, cache consistency is automatic — no manual eviction logic is needed.

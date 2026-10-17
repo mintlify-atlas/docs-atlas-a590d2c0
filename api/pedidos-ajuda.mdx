@@ -293,3 +293,37 @@ curl -X PUT https://api.raizdobem.com.br/pedido-ajuda/101 \
 <Note>
   After approving a request (`APROVADO`), use `POST /beneficiario` with the `idPedidoAjuda` and the desired `idProgramaSocial` to enrol the person as a beneficiary. The full triage workflow is: **submit** → **review** → `APROVADO` → **create beneficiary** → **schedule appointment**.
 </Note>
+
+---
+
+## DELETE /pedido-ajuda/{id}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>DELETE</span>
+  <code>/pedido-ajuda/{"{id}"}</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Permanently removes an aid request record by its numeric ID. Returns `204 No Content` on success. If no request with that ID is found, a `NaoEncontradoException` is thrown and `404 Not Found` is returned.
+
+### Path parameters
+
+<ParamField path="id" type="integer" required>
+  Internal numeric ID of the aid request to delete.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X DELETE https://api.raizdobem.com.br/pedido-ajuda/101 \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `204 No Content` | Aid request successfully deleted. |
+| `404 Not Found` | No aid request with that ID exists. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Caller does not have the `ADMIN` role. |

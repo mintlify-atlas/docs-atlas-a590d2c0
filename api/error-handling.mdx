@@ -21,22 +21,46 @@ public class ExceptionsMapperGlobal implements ExceptionMapper<Exception> {
 
     @Override
     public Response toResponse(Exception e) {
-        if (e instanceof NaoEncontradoException)       return status(404, e.getMessage());
-        if (e instanceof ValidacaoException)           return status(422, e.getMessage());
-        if (e instanceof RegraNegocioException)        return status(409, e.getMessage());
-        if (e instanceof RequisicaoInvalidaException)  return status(400, e.getMessage());
-        if (e instanceof ConstraintViolationException) return status(400, e.getMessage());
+        if (e instanceof NaoEncontradoException) {
+            return Response.status(404)
+                    .entity(new ErroResponse(404, e.getMessage(), LocalDateTime.now()))
+                    .build();
+        }
+        if (e instanceof ValidacaoException) {
+            return Response.status(422)
+                    .entity(new ErroResponse(422, e.getMessage(), LocalDateTime.now()))
+                    .build();
+        }
+        if (e instanceof RegraNegocioException) {
+            return Response.status(409)
+                    .entity(new ErroResponse(409, e.getMessage(), LocalDateTime.now()))
+                    .build();
+        }
+        if (e instanceof RequisicaoInvalidaException) {
+            return Response.status(400)
+                    .entity(new ErroResponse(400, e.getMessage(), LocalDateTime.now()))
+                    .build();
+        }
+        if (e instanceof ConstraintViolationException) {
+            return Response.status(400)
+                    .entity(new ErroResponse(400, e.getMessage(), LocalDateTime.now()))
+                    .build();
+        }
 
         // Pass-through for known 4xx WebApplicationExceptions (e.g. JWT 401/403)
         if (e instanceof WebApplicationException wae && wae.getResponse().getStatus() < 500) {
             int status = wae.getResponse().getStatus();
-            String msg = status == 404 ? "Recurso não encontrado." : e.getMessage();
-            return status(status, msg);
+            String mensagem = status == 404 ? "Recurso não encontrado." : e.getMessage();
+            return Response.status(status)
+                    .entity(new ErroResponse(status, mensagem, LocalDateTime.now()))
+                    .build();
         }
 
         // Fallback — log internally, return generic 500
         LOG.errorf(e, "[Erro interno de servidor]: %s, %s", e.getClass().getSimpleName(), e.getMessage());
-        return status(500, "Erro interno do servidor.");
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity(new ErroResponse(500, "Erro interno do servidor.", LocalDateTime.now()))
+                .build();
     }
 }
 ```

@@ -1,5 +1,5 @@
 ---
-title: "Data Models: Request and Response Schemas"
+title: "Data Models: Shared API Request and Response Schemas"
 sidebarTitle: "Data Models"
 description: "Reference for PageResponse pagination envelope, ErroResponse error format, and key enums — StatusPedido, TipoEndereco, Sexo — used across the API."
 ---
@@ -170,7 +170,7 @@ Any field named `cpf` that carries the `@Pattern(regexp = "^\\d{11}$")` annotati
 4. **First check digit** — a weighted sum of digits 1–9 (weights 10→2) is computed. The remainder `(sum × 10) % 11` must equal digit 10 (index 9), with the special case that a remainder of 10 resolves to 0.
 5. **Second check digit** — the same process is repeated over digits 1–10 (weights 11→2) and the result must equal digit 11 (index 10).
 
-A CPF that fails any of these steps causes the service to reject the request before it reaches the database. Invalid CPFs produce a `400 Bad Request` via `ConstraintViolationException` (pattern check) or a `409 Conflict` via `RegraNegocioException` (digit verification failure), depending on where the validation triggers.
+A CPF that fails any of these steps causes the service to reject the request before it reaches the database. Invalid CPFs produce a `400 Bad Request` via `ConstraintViolationException` (pattern check on the DTO) or a `422 Unprocessable Entity` via `ValidacaoException` (digit verification failure in the service), depending on where the validation triggers.
 
 ```java
 // CpfValidatorUtil — simplified logic

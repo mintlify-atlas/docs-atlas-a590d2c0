@@ -1,5 +1,5 @@
 ---
-title: "Authenticate with Raiz do Bem API Using JWT"
+title: "Raiz do Bem API Authentication Using RSA-256 JWT Tokens"
 sidebarTitle: "Authentication"
 description: "Obtain RSA-256 signed JWT access and refresh tokens from /auth/tokenAcesso and include them as Bearer tokens in protected API requests."
 ---
@@ -82,7 +82,7 @@ curl -s -X POST http://localhost:8080/auth/tokenAcesso \
 </ResponseField>
 
 <ResponseField name="refreshToken" type="string">
-  RSA-256 signed JWT refresh token. Valid for **7 days**. Contains a `type: "refresh"` claim that distinguishes it from access tokens. Use this to obtain a new token pair without re-entering credentials.
+  RSA-256 signed JWT refresh token. Valid for **7 days**. Contains a `type: "refresh"` claim that distinguishes it from access tokens, and `iss: "raiz-do-bem"` as the issuer. Use this to obtain a new token pair without re-entering credentials.
 </ResponseField>
 
 <ResponseField name="tipo" type="string">
