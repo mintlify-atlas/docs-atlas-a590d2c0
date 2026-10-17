@@ -1,0 +1,314 @@
+---
+title: "Addresses API: Manage Geolocated Addresses"
+sidebarTitle: "Endereços"
+description: "CRUD endpoints for addresses enriched via ViaCEP — create, list, filter by city, look up by ID, validate CEP, and update or delete records."
+---
+
+The Endereços API manages the physical addresses attached to beneficiaries, dentists, and other entities in the Raiz do Bem platform. When creating or updating an address you supply only a **CEP** (Brazilian postal code), a house **number**, and a **TipoEndereco** — the API automatically fetches the remaining fields (street, neighbourhood, city, state) from the [ViaCEP](https://viacep.com.br) public postal service and stores them together. A dedicated proxy endpoint (`GET /endereco/viacep/{cep}`) is also exposed for front-end look-aheads. The `DELETE` endpoint requires the `ADMIN` role; all other operations are open to both `ADMIN` and `COLABORADOR`.
+
+---
+
+## TipoEndereco Enum
+
+| Value | Meaning |
+|---|---|
+| `RESIDENCIAL` | Beneficiary's home address |
+| `PROFISSIONAL` | Dentist's clinic or office address |
+
+---
+
+## Endpoints
+
+### Create an Address
+
+<ParamField path="POST /endereco" type="endpoint" />
+
+Creates a new address record. The API uses the provided `cep` to query ViaCEP and populate `logradouro`, `bairro`, `cidade`, and `estado` automatically. Returns `201 Created` on success.
+
+**Request body**
+
+<ParamField body="cep" type="string" required>
+  Brazilian postal code in 8-digit numeric format (e.g. `"01310100"`). Must not be empty; the API validates the CEP against ViaCEP before saving.
+</ParamField>
+
+<ParamField body="numero" type="string" required>
+  House or building number (e.g. `"42"`, `"S/N"`).
+</ParamField>
+
+<ParamField body="tipoEndereco" type="string" required>
+  Address classification. Must be one of: `RESIDENCIAL` or `PROFISSIONAL`.
+</ParamField>
+
+```bash
+curl -X POST https://api.raizdobem.org/endereco \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cep": "01310100",
+    "numero": "42",
+    "tipoEndereco": "RESIDENCIAL"
+  }'
+```
+
+**Response — `201 Created`**
+
+<ResponseField name="id" type="number">
+  Auto-generated surrogate key for the address record.
+</ResponseField>
+
+<ResponseField name="logradouro" type="string">
+  Street name populated automatically from ViaCEP.
+</ResponseField>
+
+<ResponseField name="cep" type="string">
+  Stored postal code.
+</ResponseField>
+
+<ResponseField name="numero" type="string">
+  House or building number as submitted.
+</ResponseField>
+
+<ResponseField name="bairro" type="string">
+  Neighbourhood populated automatically from ViaCEP.
+</ResponseField>
+
+<ResponseField name="cidade" type="string">
+  City name populated automatically from ViaCEP.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  State abbreviation populated automatically from ViaCEP (e.g. `"SP"`).
+</ResponseField>
+
+<ResponseField name="tipoEndereco" type="string">
+  Address type — `RESIDENCIAL` or `PROFISSIONAL`.
+</ResponseField>
+
+```json
+{
+  "id": 12,
+  "logradouro": "Avenida Paulista",
+  "cep": "01310100",
+  "numero": "42",
+  "bairro": "Bela Vista",
+  "cidade": "São Paulo",
+  "estado": "SP",
+  "tipoEndereco": "RESIDENCIAL"
+}
+```
+
+---
+
+### List All Addresses
+
+<ParamField path="GET /endereco" type="endpoint" />
+
+Returns an array of all address records stored in the database. Accessible to both `ADMIN` and `COLABORADOR` roles. Note: this endpoint returns a plain array, not a paginated envelope.
+
+```bash
+curl https://api.raizdobem.org/endereco \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": 12,
+    "logradouro": "Avenida Paulista",
+    "cep": "01310100",
+    "numero": "42",
+    "bairro": "Bela Vista",
+    "cidade": "São Paulo",
+    "estado": "SP",
+    "tipoEndereco": "RESIDENCIAL"
+  }
+]
+```
+
+---
+
+### List Addresses by City
+
+<ParamField path="GET /endereco/{cidade}" type="endpoint" />
+
+Filters and returns all addresses whose `cidade` field matches the given city name. Accessible to both `ADMIN` and `COLABORADOR` roles.
+
+**Path parameter**
+
+<ParamField path="cidade" type="string" required>
+  City name to filter by (e.g. `"São Paulo"`). URL-encode special characters.
+</ParamField>
+
+```bash
+curl "https://api.raizdobem.org/endereco/S%C3%A3o%20Paulo" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`**
+
+```json
+[
+  {
+    "id": 12,
+    "logradouro": "Avenida Paulista",
+    "cep": "01310100",
+    "numero": "42",
+    "bairro": "Bela Vista",
+    "cidade": "São Paulo",
+    "estado": "SP",
+    "tipoEndereco": "RESIDENCIAL"
+  }
+]
+```
+
+---
+
+### Get Address by ID
+
+<ParamField path="GET /endereco/id/{id}" type="endpoint" />
+
+Retrieves a single address by its surrogate numeric ID. Returns `404` if no address with the given ID exists.
+
+**Path parameter**
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the address (e.g. `12`).
+</ParamField>
+
+```bash
+curl "https://api.raizdobem.org/endereco/id/12" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": 12,
+  "logradouro": "Avenida Paulista",
+  "cep": "01310100",
+  "numero": "42",
+  "bairro": "Bela Vista",
+  "cidade": "São Paulo",
+  "estado": "SP",
+  "tipoEndereco": "RESIDENCIAL"
+}
+```
+
+---
+
+### Look Up CEP via ViaCEP
+
+<ParamField path="GET /endereco/viacep/{cep}" type="endpoint" />
+
+Proxies a CEP look-up to the external [ViaCEP](https://viacep.com.br) service and returns the raw address data. Use this endpoint for address auto-fill in client applications before creating a full address record. Returns `404` (via `NaoEncontradoException`) when ViaCEP returns no result for the given CEP.
+
+**Path parameter**
+
+<ParamField path="cep" type="string" required>
+  8-digit Brazilian postal code — digits only, no hyphen (e.g. `"01310100"`).
+</ParamField>
+
+```bash
+curl "https://api.raizdobem.org/endereco/viacep/01310100" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`** (ViaCEP fields forwarded verbatim)
+
+```json
+{
+  "cep": "01310-100",
+  "logradouro": "Avenida Paulista",
+  "complemento": "de 610 a 1048 - lado par",
+  "bairro": "Bela Vista",
+  "localidade": "São Paulo",
+  "uf": "SP",
+  "ibge": "3550308",
+  "gia": "1004",
+  "ddd": "11",
+  "siafi": "7107"
+}
+```
+
+<Note>
+  The `localidade` and `uf` fields in the ViaCEP response correspond to `cidade` and `estado` in the stored `Endereco` entity. The mapping is applied when `POST /endereco` persists the record.
+</Note>
+
+---
+
+### Update an Address
+
+<ParamField path="PUT /endereco/{id}" type="endpoint" />
+
+Updates an existing address by ID. Like the `POST` endpoint, only `cep`, `numero`, and `tipoEndereco` are required — the geographic fields are re-fetched from ViaCEP. Accessible to both `ADMIN` and `COLABORADOR` roles.
+
+**Path parameter**
+
+<ParamField path="id" type="integer" required>
+  Numeric ID of the address to update.
+</ParamField>
+
+**Request body**
+
+<ParamField body="cep" type="string">
+  Updated postal code.
+</ParamField>
+
+<ParamField body="numero" type="string">
+  Updated house or building number.
+</ParamField>
+
+<ParamField body="tipoEndereco" type="string">
+  Updated address type: `RESIDENCIAL` or `PROFISSIONAL`.
+</ParamField>
+
+```bash
+curl -X PUT "https://api.raizdobem.org/endereco/12" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cep": "04538133",
+    "numero": "100",
+    "tipoEndereco": "PROFISSIONAL"
+  }'
+```
+
+**Response — `200 OK`** — returns the updated `EnderecoResponse` object.
+
+---
+
+### Delete an Address
+
+<ParamField path="DELETE /endereco/{id}" type="endpoint" />
+
+Permanently deletes the address with the given ID. **Requires `ADMIN` role.** Returns `204 No Content` on success. Throws `NaoEncontradoException` (→ `404`) if the ID does not exist.
+
+**Path parameter**
+
+<ParamField path="id" type="integer" required>
+  Numeric ID of the address to delete.
+</ParamField>
+
+```bash
+curl -X DELETE "https://api.raizdobem.org/endereco/12" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+**Response — `204 No Content`** (empty body)
+
+---
+
+## Security Summary
+
+| Endpoint | Method | Required Role |
+|---|---|---|
+| `/endereco` | `POST` | `ADMIN`, `COLABORADOR` |
+| `/endereco` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/endereco/{cidade}` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/endereco/id/{id}` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/endereco/viacep/{cep}` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/endereco/{id}` | `PUT` | `ADMIN`, `COLABORADOR` |
+| `/endereco/{id}` | `DELETE` | `ADMIN` |

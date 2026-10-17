@@ -1,0 +1,339 @@
+---
+title: "Beneficiaries API: Manage Dental Care Recipients"
+sidebarTitle: "Beneficiários"
+description: "CRUD endpoints for beneficiaries — list paginated, create from approved aid requests, search by CPF or city, filter by program, and export as CSV."
+---
+
+Beneficiaries (*beneficiários*) are individuals who have been approved to receive dental care through one of the NGO's social programs. A beneficiary record is always derived from an approved **Pedido de Ajuda** — you cannot create a beneficiary independently. All endpoints require a valid JWT access token. Most operations are available to both `ADMIN` and `COLABORADOR` roles; bulk export and deletion are restricted to `ADMIN` only.
+
+---
+
+## GET /beneficiario
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/beneficiario</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns a paginated list of all registered beneficiaries. Results are cached server-side; use pagination parameters to walk through large datasets.
+
+### Query parameters
+
+<ParamField query="pagina" type="integer" default="0">
+  Zero-based page number to return.
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Number of records per page.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/beneficiario?pagina=0&size=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+{
+  "content": [
+    {
+      "id": 1,
+      "cpf": "12345678901",
+      "nomeCompleto": "Maria da Silva",
+      "dataNascimento": "1990-05-15",
+      "telefone": "11999990001",
+      "email": "maria.silva@email.com",
+      "pedido": {
+        "id": 42,
+        "dentistaResponsavel": "Dr. João Souza"
+      },
+      "programaSocial": "Dentista do Bem",
+      "endereco": {
+        "id": 7,
+        "logradouro": "Rua das Flores",
+        "cep": "01310100",
+        "numero": "123",
+        "bairro": "Bela Vista",
+        "cidade": "São Paulo",
+        "estado": "SP",
+        "tipoEndereco": "RESIDENCIAL"
+      }
+    }
+  ],
+  "totalElements": 87,
+  "totalPages": 5,
+  "pagina": 0,
+  "size": 20
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="integer">
+  Internal database identifier.
+</ResponseField>
+
+<ResponseField name="cpf" type="string">
+  11-digit CPF (carried over from the originating aid request).
+</ResponseField>
+
+<ResponseField name="nomeCompleto" type="string">
+  Full name of the beneficiary.
+</ResponseField>
+
+<ResponseField name="dataNascimento" type="string (date)">
+  Date of birth in `YYYY-MM-DD` format.
+</ResponseField>
+
+<ResponseField name="telefone" type="string">
+  Contact phone number.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Contact e-mail address.
+</ResponseField>
+
+<ResponseField name="pedido" type="object">
+  Summary of the originating aid request — includes `id` and `dentistaResponsavel`.
+</ResponseField>
+
+<ResponseField name="programaSocial" type="string">
+  Name of the social program the beneficiary is enrolled in (e.g. `"Dentista do Bem"` or `"Apolônias do Bem"`).
+</ResponseField>
+
+<ResponseField name="endereco" type="object">
+  Full address object including `logradouro`, `cep`, `numero`, `bairro`, `cidade`, `estado`, and `tipoEndereco`.
+</ResponseField>
+
+---
+
+## POST /beneficiario
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/beneficiario</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Promotes an **approved** aid request into a full beneficiary record and enrols the person in a social program. The referenced `PedidoAjuda` must already have `status = APROVADO`; attempting to promote a pending or rejected request returns `400 Bad Request`.
+
+### Request body
+
+<ParamField body="idPedidoAjuda" type="integer" required>
+  ID of the approved `PedidoAjuda` record that will be used to populate the beneficiary's personal data. `@NotNull`.
+</ParamField>
+
+<ParamField body="idProgramaSocial" type="integer" required>
+  ID of the social program to enrol the new beneficiary in (e.g. `1` = Dentista do Bem, `2` = Apolônias do Bem). `@NotNull`.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/beneficiario \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idPedidoAjuda": 42,
+    "idProgramaSocial": 1
+  }'
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `201 Created` | Beneficiary created successfully; full `BeneficiarioResponse` in body. |
+| `400 Bad Request` | Missing required fields or the referenced `PedidoAjuda` is not approved. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Authenticated role lacks permission. |
+
+---
+
+## GET /beneficiario/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/beneficiario/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Retrieves a single beneficiary by their 11-digit CPF.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the beneficiary (digits only, no formatting).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/beneficiario/12345678901 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /beneficiario/cidade/{cidade}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/beneficiario/cidade/{"{cidade}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns all beneficiaries whose registered address city matches the given value (case-insensitive). Useful for geographic filtering without pagination.
+
+### Path parameters
+
+<ParamField path="cidade" type="string" required>
+  City name to filter by (e.g. `"São Paulo"`, `"Campinas"`).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/beneficiario/cidade/S%C3%A3o%20Paulo" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /beneficiario/programa/{idProgramaSocial}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/beneficiario/programa/{"{idProgramaSocial}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns all beneficiaries enrolled in a specific social program. Use `GET /programas-sociais` to discover available program IDs.
+
+### Path parameters
+
+<ParamField path="idProgramaSocial" type="integer" required>
+  The numeric ID of the social program (e.g. `1` for *Dentista do Bem*, `2` for *Apolônias do Bem*).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/beneficiario/programa/1 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /beneficiario/exportarCsv
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/beneficiario/exportarCsv</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Exports the complete beneficiary list as a UTF-8 encoded CSV file. The server sets `Content-Disposition: attachment` so browsers will prompt a download. Restricted to `ADMIN` role only.
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/beneficiario/exportarCsv \
+  -H "Authorization: Bearer <admin-token>" \
+  -o Beneficiarios_2024-01-15.csv
+```
+
+### Response headers
+
+```
+Content-Type: text/csv; charset=UTF-8
+Content-Disposition: attachment; filename="Beneficiarios_20240115_103000.csv"
+```
+
+---
+
+## PUT /beneficiario/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>PUT</span>
+  <code>/beneficiario/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Updates mutable contact and address information for a beneficiary. Only the fields listed below may be changed; CPF, name, and date of birth are immutable after creation.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the beneficiary to update.
+</ParamField>
+
+### Request body
+
+<ParamField body="telefone" type="string">
+  Updated phone number.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Updated e-mail address.
+</ParamField>
+
+<ParamField body="endereco" type="object">
+  Partial address update. Contains two string sub-fields:
+  - `cep` — 8-digit postal code (digits only).
+  - `numero` — Street number or apartment identifier.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT https://api.raizdobem.com.br/beneficiario/12345678901 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefone": "11988887777",
+    "email": "maria.nova@email.com",
+    "endereco": {
+      "cep": "01310100",
+      "numero": "456"
+    }
+  }'
+```
+
+---
+
+## DELETE /beneficiario/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>DELETE</span>
+  <code>/beneficiario/{"{cpf}"}</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Permanently removes a beneficiary record. Returns `204 No Content` on success. If the CPF is not found, a `NaoEncontradoException` is thrown, resulting in a `404` response.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the beneficiary to delete.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X DELETE https://api.raizdobem.com.br/beneficiario/12345678901 \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `204 No Content` | Beneficiary successfully deleted. |
+| `404 Not Found` | No beneficiary with that CPF exists. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Caller does not have the `ADMIN` role. |

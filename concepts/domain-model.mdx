@@ -1,0 +1,357 @@
+---
+title: "Domain Model: Entities and Relationships"
+sidebarTitle: "Domain Model"
+description: "Learn about the eight core domain entities in Raiz do Bem API — Beneficiario, PedidoAjuda, Dentista, Atendimento, Colaborador, Endereco, ProgramaSocial, and Especialidade."
+---
+
+The Raiz do Bem API models the entire lifecycle of dental care assistance for vulnerable populations through eight tightly related JPA entities. A help request (`PedidoAjuda`) is the entry point submitted publicly by the applicant; once triaged and approved, it produces a `Beneficiario` who is enrolled in a `ProgramaSocial`. An `Atendimento` (appointment) then connects that beneficiary to a volunteer `Dentista`, and the whole process is supervised by an authenticated `Colaborador`. Cross-cutting concerns like geolocation are handled by the `Endereco` entity, while `Especialidade` captures the dental specialties that qualify each dentist for specific programs.
+
+## Entity Overview Table
+
+| Entity | Key Fields | Role in the Domain |
+|:---|:---|:---|
+| `Beneficiario` | `cpf`, `nomeCompleto`, `dataNascimento`, `telefone`, `email` | Vulnerable person approved in triage and linked to a social program. |
+| `PedidoAjuda` | `cpf`, `nomeCompleto`, `descricaoProblema`, `dataPedido`, `status` | Initial public help request, controlled by `StatusPedido` flow. |
+| `Dentista` | `croDentista`, `cpf`, `nomeCompleto`, `sexo`, `categoria`, `disponivel` | Volunteer dental professional with specialties and availability flag. |
+| `Atendimento` | `prontuario`, `dataInicial`, `dataFinal` | Clinical record linking a beneficiary to a dentist, with open/close dates. |
+| `Colaborador` | `cpf`, `nomeCompleto`, `email`, `senha`, `role` | Internal NGO user authenticated via JWT with ADMIN or COLABORADOR role. |
+| `Endereco` | `logradouro`, `cep`, `numero`, `bairro`, `cidade`, `estado`, `tipoEndereco` | Georeferenced address (RESIDENCIAL or PROFISSIONAL) validated via ViaCEP. |
+| `ProgramaSocial` | `id`, `programa` | NGO social programs — *Dentista do Bem* and *Apolônias do Bem*. |
+| `Especialidade` | `id`, `descricao` | Catalog of dental specialties assignable to volunteer dentists. |
+
+## Relationship Flow
+
+The primary business flow follows a chain of associations:
+
+```
+PedidoAjuda ──(approved)──► Beneficiario ──► Atendimento ──► Dentista
+                │                │                               │
+                └── Endereco     └── ProgramaSocial              └── Especialidade[]
+                                 └── Endereco                    └── ProgramaSocial[]
+                                                                 └── Endereco (PROFISSIONAL)
+```
+
+A `Colaborador` supervises the triage of `PedidoAjuda` and is recorded on the resulting `Atendimento` as the responsible internal operator.
+
+## Entity Details
+
+<Accordion title="Beneficiario">
+  `Beneficiario` represents a person who has been approved through the triage process and is actively enrolled in a social program. It is created from an approved `PedidoAjuda` and carries the beneficiary's full personal details along with three mandatory associations.
+
+  ```java
+  @Entity
+  public class Beneficiario {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_beneficiario")
+      private Long id;
+
+      @Pattern(regexp = "\\d{11}", message = "CPF deve conter 11 números")
+      private String cpf;
+
+      @Column(name = "nome_completo")
+      private String nomeCompleto;
+
+      @Column(name = "data_nascimento")
+      private LocalDate dataNascimento;
+
+      private String telefone;
+      private String email;
+
+      @ManyToOne
+      @JoinColumn(name = "id_pedido_ajuda")
+      private PedidoAjuda pedido;
+
+      @ManyToOne
+      @JoinColumn(name = "id_programa_social")
+      private ProgramaSocial programaSocial;
+
+      @ManyToOne
+      @JoinColumn(name = "id_endereco")
+      private Endereco endereco;
+  }
+  ```
+
+  **Associations:**
+  - `pedido` (ManyToOne → `PedidoAjuda`): the originating help request.
+  - `programaSocial` (ManyToOne → `ProgramaSocial`): the NGO program in which the beneficiary is enrolled.
+  - `endereco` (ManyToOne → `Endereco`): the residential address used for geographic matching.
+</Accordion>
+
+<Accordion title="PedidoAjuda">
+  `PedidoAjuda` is the publicly submittable help request — the entry point of the entire assistance lifecycle. It contains the applicant's personal data and a description of their dental problem. Its `status` field drives the triage workflow through the `StatusPedido` enum.
+
+  ```java
+  @Entity
+  @Table(name = "pedido_ajuda")
+  public class PedidoAjuda {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_pedido")
+      private Long id;
+
+      private String cpf;
+
+      @Column(name = "nome_completo")
+      private String nomeCompleto;
+
+      @Column(name = "data_nascimento")
+      private LocalDate dataNascimento;
+
+      @Enumerated(EnumType.STRING)
+      private Sexo sexo;
+
+      private String telefone;
+      private String email;
+
+      @Column(name = "descricao_problema")
+      private String descricaoProblema;
+
+      @Column(name = "data_pedido")
+      private LocalDate dataPedido;
+
+      @Enumerated(EnumType.STRING)
+      @Column(name = "status_pedido")
+      private StatusPedido status;
+
+      @ManyToOne
+      @JoinColumn(name = "id_endereco")
+      private Endereco endereco;
+
+      @ManyToOne
+      @JoinColumn(name = "id_dentista")
+      private Dentista dentista;
+  }
+  ```
+
+  **`StatusPedido` enum values:**
+
+  | Value | Meaning |
+  |:---|:---|
+  | `PENDENTE` | Newly submitted — awaiting collaborator triage. |
+  | `APROVADO` | Approved by a collaborator; triggers creation of a `Beneficiario`. |
+  | `REJEITADO` | Rejected after triage; no beneficiary record is created. |
+</Accordion>
+
+<Accordion title="Dentista">
+  `Dentista` models a volunteer dental professional. The `disponivel` flag controls whether the dentist is eligible for geographic matching against new beneficiaries. The `croDentista` field stores the Brazilian dental council registration number (CRO). A dentist may be linked to multiple specialties and multiple social programs through join tables.
+
+  ```java
+  @Entity
+  public class Dentista {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_dentista")
+      private Long id;
+
+      @Column(name = "cro")
+      private String croDentista;
+
+      private String cpf;
+
+      @Column(name = "nome_completo")
+      private String nomeCompleto;
+
+      @Enumerated(EnumType.STRING)
+      private Sexo sexo;
+
+      private String email;
+      private String telefone;
+      private String categoria;
+      private String disponivel;
+
+      @ManyToOne
+      @JoinColumn(name = "id_endereco")
+      private Endereco endereco;
+
+      @ManyToMany
+      @JoinTable(name = "dentista_especialidade", ...)
+      private List<Especialidade> especialidades;
+
+      @ManyToMany
+      @JoinTable(name = "Dentista_Programa_Social", ...)
+      private List<ProgramaSocial> programasSociais;
+  }
+  ```
+
+  **Associations:**
+  - `endereco` (ManyToOne → `Endereco`): must be of type `PROFISSIONAL` — used as the destination address in geographic matching.
+  - `especialidades` (ManyToMany → `Especialidade`): via `dentista_especialidade` join table.
+  - `programasSociais` (ManyToMany → `ProgramaSocial`): via `Dentista_Programa_Social` join table.
+</Accordion>
+
+<Accordion title="Atendimento">
+  `Atendimento` is the clinical appointment record that ties a `Beneficiario` to a `Dentista`. It stores the `prontuario` (medical record notes), an automatically-set `dataInicial`, and an optional `dataFinal` set when the appointment is closed. The supervising `Colaborador` is also recorded here.
+
+  ```java
+  @Entity
+  public class Atendimento {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_atendimento")
+      private Long id;
+
+      private String prontuario;
+
+      @Column(name = "data_inicial")
+      private LocalDate dataInicial = LocalDate.now();
+
+      @Column(name = "data_final")
+      private LocalDate dataFinal;
+
+      @ManyToOne
+      @JoinColumn(name = "id_beneficiario")
+      private Beneficiario beneficiario;
+
+      @ManyToOne
+      @JoinColumn(name = "id_dentista")
+      private Dentista dentista;
+
+      @ManyToOne
+      @JoinColumn(name = "id_colaborador")
+      private Colaborador colaborador;
+  }
+  ```
+
+  When no `Dentista` is specified at creation time, `AtendimentoMatchService` automatically selects the nearest available dentist via the Google Maps Routes API.
+</Accordion>
+
+<Accordion title="Colaborador">
+  `Colaborador` is an internal NGO staff member who authenticates via SmallRye JWT (RSA-256). Passwords are never stored in plain text — they are hashed with Bcrypt and never returned in response DTOs. The `role` field defaults to `"COLABORADOR"` and can be elevated to `"ADMIN"`.
+
+  ```java
+  @Entity
+  public class Colaborador {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_colaborador")
+      private Long id;
+
+      private String cpf;
+
+      @Column(name = "nome_completo")
+      private String nomeCompleto;
+
+      @Column(name = "data_nascimento")
+      private LocalDate dataNascimento;
+
+      @Column(name = "data_contratacao")
+      private LocalDate dataContratacao;
+
+      private String email;
+      private String senha;           // Bcrypt-hashed, omitted in all response DTOs
+      private String role = "COLABORADOR";
+  }
+  ```
+
+  **Role-based access:**
+
+  | Role | Permitted Operations |
+  |:---|:---|
+  | `COLABORADOR` | Read all resources, create/update beneficiaries, dentists, appointments, addresses, and process help requests. |
+  | `ADMIN` | All `COLABORADOR` permissions plus delete operations, collaborator management, and CSV export of sensitive data. |
+</Accordion>
+
+<Accordion title="Endereco">
+  `Endereco` stores a georeferenced postal address. Every address created via the API is enriched and validated through the `ViaCepClient`, which fills in `logradouro`, `bairro`, `cidade`, and `estado` from the provided `cep`. The `tipoEndereco` discriminator determines how the address is used by the geographic matching algorithm.
+
+  ```java
+  @Entity
+  public class Endereco {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      @Column(name = "id_endereco")
+      private Long id;
+
+      private String logradouro;
+      private String cep;
+      private String numero;
+      private String bairro;
+      private String cidade;
+      private String estado;
+
+      @Enumerated(EnumType.STRING)
+      @Column(name = "tipo_endereco")
+      private TipoEndereco tipoEndereco;
+  }
+  ```
+
+  **`TipoEndereco` enum values:**
+
+  | Value | Usage |
+  |:---|:---|
+  | `RESIDENCIAL` | Assigned to `Beneficiario` — used as the **origin** in geographic matching. |
+  | `PROFISSIONAL` | Assigned to `Dentista` — used as **destinations** in geographic matching. |
+</Accordion>
+
+<Accordion title="ProgramaSocial">
+  `ProgramaSocial` represents one of the NGO's social programs. Beneficiaries are enrolled in exactly one program, while dentists can volunteer across multiple programs. The `id` is manually assigned (no `@GeneratedValue`), keeping catalog values stable.
+
+  ```java
+  @Entity
+  @Table(name = "programa_social")
+  public class ProgramaSocial {
+      @Id
+      @Column(name = "id_programa")
+      private Long id;
+
+      private String programa;
+  }
+  ```
+
+  The two programs currently supported are **Dentista do Bem** (dental care for low-income youth) and **Apolônias do Bem** (care for women survivors of violence). Catalog endpoints (`GET /programas-sociais`) are publicly accessible (`@PermitAll`).
+</Accordion>
+
+<Accordion title="Especialidade">
+  `Especialidade` is a simple catalog entity describing a dental specialty (e.g., orthodontics, endodontics). Dentists are linked to one or more specialties via the `dentista_especialidade` join table. Like `ProgramaSocial`, its `id` is a stable, manually managed catalog key.
+
+  ```java
+  @Entity
+  public class Especialidade {
+      @Id
+      @Column(name = "id_especialidade")
+      private Long id;
+
+      private String descricao;
+  }
+  ```
+
+  Specialty catalog endpoints (`GET /especialidades`) are publicly accessible (`@PermitAll`), allowing front-end registration forms to populate specialty selection lists without requiring authentication.
+</Accordion>
+
+## Enumerations
+
+<Tabs>
+  <Tab title="StatusPedido">
+    Controls the triage workflow of a help request.
+
+    ```java
+    public enum StatusPedido {
+        PENDENTE,   // Awaiting collaborator review
+        APROVADO,   // Approved — triggers Beneficiario creation
+        REJEITADO   // Rejected — no further action
+    }
+    ```
+  </Tab>
+  <Tab title="TipoEndereco">
+    Discriminates address usage in geographic matching.
+
+    ```java
+    public enum TipoEndereco {
+        RESIDENCIAL,    // Beneficiary home address (match origin)
+        PROFISSIONAL    // Dentist clinic address (match destination)
+    }
+    ```
+  </Tab>
+  <Tab title="Sexo">
+    Biological sex options for persons across all person entities.
+
+    ```java
+    public enum Sexo {
+        M,  // Male
+        F,  // Female
+        O   // Other
+    }
+    ```
+  </Tab>
+</Tabs>

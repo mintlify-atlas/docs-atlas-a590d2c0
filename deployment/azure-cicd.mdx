@@ -1,0 +1,151 @@
+---
+title: "Deploy Raiz do Bem API to Azure App Service via Pipelines"
+sidebarTitle: "Azure CI/CD"
+description: "Automate build, test, and deployment of the Raiz do Bem API to Azure App Service using the included Azure Pipelines configuration on the main and develop branches."
+---
+
+The Raiz do Bem API includes a production-grade CI/CD pipeline defined in `azure-pipelines.yml` at the root of the repository. Every push to the `main` or `develop` branches automatically triggers a full pipeline run: the Maven build compiles the source with Java 21, executes all 285 unit tests, packages the application as a Quarkus fast-jar, and deploys the artifact to the **`raizdobem-backend`** Azure App Service (Linux, Java 21 SE, Canada Central region) using the `AzureWebApp@1` task. The only manual step required is configuring the four secret environment variables in Azure App Service → Configuration before the first deployment.
+
+## Pipeline Overview
+
+The pipeline is defined in `azure-pipelines.yml` and targets the default pool named `Default`. Java version is controlled via the pipeline variable `javaVersion: '21'`.
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pool:
+  name: Default
+
+variables:
+  javaVersion: '21'
+
+steps:
+  - script: mvn -B clean package -Dquarkus.package.type=fast-jar
+    displayName: 'Build Maven and Run Tests'
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Build Artifact'
+    inputs:
+      PathtoPublish: 'target/quarkus-app'
+      ArtifactName: 'drop'
+
+  - task: AzureWebApp@1
+    displayName: 'Deploy to Azure Web App'
+    inputs:
+      azureSubscription: 'sc-raizdobem-backend'
+      appType: 'webAppLinux'
+      appName: 'raizdobem-backend'
+      package: '$(System.DefaultWorkingDirectory)/target/quarkus-app/'
+      startUpCommand: 'java -jar /home/site/wwwroot/quarkus-run.jar'
+```
+
+## Pipeline Stages
+
+<Steps>
+
+<Step title="Trigger on main or develop">
+
+The pipeline triggers automatically on every push or merged pull request to the `main` and `develop` branches. No manual trigger or scheduled run is required. This means every feature branch merged into `develop` produces a validated deployment to the App Service, and merges into `main` reflect the production-ready state.
+
+</Step>
+
+<Step title="Build and Run All Tests">
+
+The `mvn -B clean package -Dquarkus.package.type=fast-jar` command compiles the full project with Java 21, runs all **285 unit tests** (JUnit 5 + Mockito 5.18 + AssertJ 3.27), and packages the application as a Quarkus fast-jar. The `-B` flag enables non-interactive (batch) mode suitable for CI environments.
+
+If any test fails, the pipeline stops here and does **not** proceed to deployment, protecting the App Service from broken builds.
+
+<Warning>
+The four runtime secrets — `DB_URL`, `DB_USUARIO`, `DB_SENHA`, and `GOOGLE_API_KEY` — **must be set as environment variables** in Azure App Service → Configuration → Application Settings before the first deployment. The application will fail to start if the Oracle datasource cannot be reached or if `GOOGLE_API_KEY` is missing. These values are never stored in `azure-pipelines.yml` or `application.properties`.
+</Warning>
+
+</Step>
+
+<Step title="Publish the Build Artifact">
+
+The `PublishBuildArtifacts@1` task archives the entire `target/quarkus-app/` directory as a pipeline artifact named **`drop`**. This artifact contains the fast-jar layout required by the App Service startup command:
+
+```
+target/quarkus-app/
+├── lib/               # Dependency JARs (rarely change — cached by Docker/Azure)
+├── app/               # Application classes JAR
+├── quarkus/           # Quarkus boot JARs
+└── quarkus-run.jar    # Entry-point JAR — referenced by the startup command
+```
+
+</Step>
+
+<Step title="Deploy to Azure App Service">
+
+The `AzureWebApp@1` task deploys the `drop` artifact to the **`raizdobem-backend`** App Service using the Azure service connection `sc-raizdobem-backend`. Key deployment settings:
+
+| Parameter | Value |
+|---|---|
+| `azureSubscription` | `sc-raizdobem-backend` (service connection name) |
+| `appType` | `webAppLinux` |
+| `appName` | `raizdobem-backend` |
+| `package` | `$(System.DefaultWorkingDirectory)/target/quarkus-app/` |
+| `startUpCommand` | `java -jar /home/site/wwwroot/quarkus-run.jar` |
+
+The App Service is configured in `pom.xml` under `azure-webapp-maven-plugin`:
+
+| Setting | Value |
+|---|---|
+| Subscription ID | `b4ad0d13-b7d8-4366-b605-d446f2753002` |
+| Resource Group | `rg-raizdobem-backend` |
+| App Name | `raizdobem-backend` |
+| Region | `canadacentral` |
+| OS | Linux |
+| Java Version | Java 21 |
+| Web Container | Java SE |
+
+</Step>
+
+</Steps>
+
+## Required Azure Configuration
+
+Before the pipeline runs for the first time, complete these one-time setup steps in the Azure Portal:
+
+<Steps>
+
+<Step title="Create the Service Connection">
+
+In Azure DevOps → Project Settings → Service Connections, create a new **Azure Resource Manager** service connection named exactly **`sc-raizdobem-backend`**. Grant it access to the subscription `b4ad0d13-b7d8-4366-b605-d446f2753002` and resource group `rg-raizdobem-backend`.
+
+</Step>
+
+<Step title="Provision the App Service">
+
+Ensure the `raizdobem-backend` App Service exists in the `rg-raizdobem-backend` resource group in the **Canada Central** region, running **Linux** with the **Java 21 SE** stack. You can provision it with the Maven plugin:
+
+```bash
+./mvnw azure-webapp:deploy -DskipTests
+```
+
+</Step>
+
+<Step title="Set Application Settings (Secrets)">
+
+In the Azure Portal, navigate to **`raizdobem-backend` → Configuration → Application Settings** and add the following key-value pairs:
+
+<Warning>
+These four variables are required for the application to start. Missing or incorrect values will cause a 503 error on all API endpoints immediately after deployment.
+</Warning>
+
+| Application Setting Key | Description |
+|---|---|
+| `DB_URL` | Full JDBC connection string — e.g. `jdbc:oracle:thin:@//host:1521/XEPDB1` |
+| `DB_USUARIO` | Oracle database username |
+| `DB_SENHA` | Oracle database password |
+| `GOOGLE_API_KEY` | Google Cloud API key with **Routes API** enabled (used for geographic dentist matching) |
+
+Click **Save** and restart the App Service after adding all four settings.
+
+</Step>
+
+</Steps>

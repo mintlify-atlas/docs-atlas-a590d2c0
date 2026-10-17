@@ -1,0 +1,295 @@
+---
+title: "Aid Requests API: Triage Dental Help Applications"
+sidebarTitle: "Pedidos de Ajuda"
+description: "Public and authenticated endpoints for aid requests — submit applications publicly, list paginated, filter by date, and process triage decisions."
+---
+
+Pedidos de Ajuda (*aid requests*) are the entry point into the Raiz do Bem care pipeline. Any member of the public can submit an application describing their dental problem — the `POST /pedido-ajuda` endpoint is `@PermitAll` and requires no authentication. Once submitted, a request enters `PENDENTE` status and awaits triage by a collaborator or administrator. During triage a reviewer sets the `statusPedido` to either `APROVADO` or `REJEITADO`. An `APROVADO` request can then be promoted to a full beneficiary record via `POST /beneficiario`.
+
+---
+
+## POST /pedido-ajuda
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/pedido-ajuda</code>
+  <span style={{ background: "#6366f1", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>@PermitAll — no auth required</span>
+</div>
+
+Submits a new aid request on behalf of a person seeking dental care. This endpoint is **publicly accessible** — no JWT or account is needed. The record is created with `status = PENDENTE` and `dataPedido` set to the current date. All fields are required and validated; any constraint violation returns `400 Bad Request`.
+
+### Request body
+
+<ParamField body="cpf" type="string" required>
+  11-digit CPF of the applicant (digits only). Must match `^\d{11}$`.
+</ParamField>
+
+<ParamField body="nome" type="string" required>
+  Full name of the applicant (non-blank).
+</ParamField>
+
+<ParamField body="dataNascimento" type="string (date)" required>
+  Date of birth in `YYYY-MM-DD` format. `@NotNull`.
+</ParamField>
+
+<ParamField body="sexo" type="string" required>
+  Gender identifier (non-blank, e.g. `"M"`, `"F"`, `"O"`).
+</ParamField>
+
+<ParamField body="telefone" type="string" required>
+  Contact phone number (non-blank).
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid e-mail address (`@Email` validated, non-blank).
+</ParamField>
+
+<ParamField body="descricaoProblema" type="string" required>
+  Free-text description of the dental problem the applicant is experiencing (non-blank).
+</ParamField>
+
+<ParamField body="endereco" type="object" required>
+  Address of the applicant. `@NotNull`, `@Valid`. Contains:
+  - `cep` *(string)* — 8-digit postal code (digits only).
+  - `numero` *(string)* — Street number or apartment identifier.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/pedido-ajuda \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cpf": "11122233344",
+    "nome": "José Almeida",
+    "dataNascimento": "1985-03-22",
+    "sexo": "M",
+    "telefone": "11955554444",
+    "email": "jose.almeida@email.com",
+    "descricaoProblema": "Dor intensa no dente do siso há 3 dias, sem condições financeiras para tratamento.",
+    "endereco": {
+      "cep": "08010000",
+      "numero": "88"
+    }
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": 101,
+  "cpf": "11122233344",
+  "nomeCompleto": "José Almeida",
+  "dataNascimento": "1985-03-22",
+  "telefone": "11955554444",
+  "email": "jose.almeida@email.com",
+  "descricaoProblema": "Dor intensa no dente do siso há 3 dias, sem condições financeiras para tratamento.",
+  "dataPedido": "2024-01-15",
+  "status": "PENDENTE",
+  "dentistaResponsavel": null,
+  "endereco": "Rua das Acácias, 88 - São Paulo/SP"
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="integer">
+  Internal ID assigned to the new aid request.
+</ResponseField>
+
+<ResponseField name="cpf" type="string">
+  CPF of the applicant.
+</ResponseField>
+
+<ResponseField name="nomeCompleto" type="string">
+  Full name of the applicant.
+</ResponseField>
+
+<ResponseField name="dataNascimento" type="string (date)">
+  Date of birth in `YYYY-MM-DD` format.
+</ResponseField>
+
+<ResponseField name="telefone" type="string">
+  Contact phone number.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  E-mail address.
+</ResponseField>
+
+<ResponseField name="descricaoProblema" type="string">
+  Original problem description as submitted.
+</ResponseField>
+
+<ResponseField name="dataPedido" type="string (date)">
+  Date the request was submitted (set server-side to the current date).
+</ResponseField>
+
+<ResponseField name="status" type="string (enum)">
+  Current triage status. On creation always `"PENDENTE"`. Possible values:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `PENDENTE` | Awaiting review by a collaborator. |
+  | `APROVADO` | Request approved; eligible to become a beneficiary. |
+  | `REJEITADO` | Request rejected by the reviewing collaborator. |
+</ResponseField>
+
+<ResponseField name="dentistaResponsavel" type="string or null">
+  Full name of the dentist assigned during triage, or `null` if not yet assigned.
+</ResponseField>
+
+<ResponseField name="endereco" type="string">
+  Formatted address string resolved from the submitted CEP.
+</ResponseField>
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `201 Created` | Aid request submitted successfully. |
+| `400 Bad Request` | Missing required fields or validation failure. |
+
+---
+
+## GET /pedido-ajuda
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/pedido-ajuda</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns a paginated list of all aid requests in the system, regardless of status.
+
+### Query parameters
+
+<ParamField query="pagina" type="integer" default="0">
+  Zero-based page number.
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Number of records per page.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/pedido-ajuda?pagina=0&size=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /pedido-ajuda/data/{data}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/pedido-ajuda/data/{"{data}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Lists all aid requests submitted on a specific date. The date value is parsed via `LocalDate.parse(data)`, so it must be a valid ISO-8601 date string.
+
+### Path parameters
+
+<ParamField path="data" type="string (date)" required>
+  Date to filter by in `YYYY-MM-DD` format (e.g. `"2024-01-15"`).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/pedido-ajuda/data/2024-01-15 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## PUT /pedido-ajuda/{id}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>PUT</span>
+  <code>/pedido-ajuda/{"{id}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Processes (triages) an aid request by setting a status decision and optionally assigning a responsible dentist. Setting `statusPedido` to `APROVADO` marks the request as eligible to be promoted into a beneficiary record via `POST /beneficiario`. Setting `REJEITADO` closes the request.
+
+### Path parameters
+
+<ParamField path="id" type="integer" required>
+  Numeric ID of the aid request to process.
+</ParamField>
+
+### Request body
+
+<ParamField body="statusPedido" type="string (enum)">
+  The triage decision to apply. Accepted values:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `PENDENTE` | Keep the request in review (no-op status change). |
+  | `APROVADO` | Approve — the person may now be enrolled as a beneficiary. |
+  | `REJEITADO` | Reject — the request is closed with no further action. |
+</ParamField>
+
+<ParamField body="idDentista" type="integer">
+  ID of the dentist to assign as responsible for following up with this applicant. Optional; can be omitted if no dentist assignment is needed at this stage.
+</ParamField>
+
+### Example request — approving and assigning a dentist
+
+```bash
+curl -X PUT https://api.raizdobem.com.br/pedido-ajuda/101 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "statusPedido": "APROVADO",
+    "idDentista": 12
+  }'
+```
+
+### Example request — rejecting a request
+
+```bash
+curl -X PUT https://api.raizdobem.com.br/pedido-ajuda/101 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "statusPedido": "REJEITADO"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": 101,
+  "cpf": "11122233344",
+  "nomeCompleto": "José Almeida",
+  "dataNascimento": "1985-03-22",
+  "telefone": "11955554444",
+  "email": "jose.almeida@email.com",
+  "descricaoProblema": "Dor intensa no dente do siso há 3 dias, sem condições financeiras para tratamento.",
+  "dataPedido": "2024-01-15",
+  "status": "APROVADO",
+  "dentistaResponsavel": "Dr. Carlos Ferreira",
+  "endereco": "Rua das Acácias, 88 - São Paulo/SP"
+}
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Triage processed; updated `PedidoAjudaResponse` returned. |
+| `400 Bad Request` | Invalid `statusPedido` value or missing body. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Role lacks permission. |
+| `404 Not Found` | No aid request with that ID exists. |
+
+<Note>
+  After approving a request (`APROVADO`), use `POST /beneficiario` with the `idPedidoAjuda` and the desired `idProgramaSocial` to enrol the person as a beneficiary. The full triage workflow is: **submit** → **review** → `APROVADO` → **create beneficiary** → **schedule appointment**.
+</Note>

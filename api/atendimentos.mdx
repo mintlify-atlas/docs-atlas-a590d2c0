@@ -1,0 +1,275 @@
+---
+title: "Dental Appointments API: Create and Track Sessions"
+sidebarTitle: "Atendimentos"
+description: "CRUD endpoints for dental appointments — create with geographic matching, query by beneficiary CPF, finalize sessions, and export reports as CSV."
+---
+
+The Atendimentos API manages dental care sessions between registered beneficiaries and volunteer dentists. When a new appointment is created, the service attempts a **geographic matching** — if no `dataInicial` is explicitly supplied the start date defaults to `LocalDate.now()`. The system automatically associates the nearest available dentist to the beneficiary's address where possible. All endpoints in this resource require a valid JWT; the `exportarCsv` route is restricted to `ADMIN` only.
+
+---
+
+## GET /atendimento
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/atendimento</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns a paginated list of all dental appointments across all beneficiaries.
+
+### Query parameters
+
+<ParamField query="pagina" type="integer" default="0">
+  Zero-based page number to return.
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Number of records per page.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/atendimento?pagina=0&size=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+{
+  "content": [
+    {
+      "id": 5,
+      "prontuario": "Tratamento inicial de cárie molar superior esquerdo.",
+      "beneficiario": "Maria da Silva",
+      "dentista": "Dr. Carlos Ferreira",
+      "contatoDentista": "11977776666",
+      "emailDentista": "carlos.ferreira@clinica.com.br",
+      "enderecoDentista": "Av. Rebouças, 500 - São Paulo/SP",
+      "dataInicial": "2024-01-15",
+      "dataFim": null
+    }
+  ],
+  "totalElements": 34,
+  "totalPages": 2,
+  "pagina": 0,
+  "size": 20
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="integer">
+  Internal appointment ID.
+</ResponseField>
+
+<ResponseField name="prontuario" type="string">
+  Clinical notes / medical record text for this appointment.
+</ResponseField>
+
+<ResponseField name="beneficiario" type="string">
+  Full name of the beneficiary receiving care.
+</ResponseField>
+
+<ResponseField name="dentista" type="string">
+  Full name of the attending dentist.
+</ResponseField>
+
+<ResponseField name="contatoDentista" type="string">
+  Phone number of the attending dentist.
+</ResponseField>
+
+<ResponseField name="emailDentista" type="string">
+  E-mail address of the attending dentist.
+</ResponseField>
+
+<ResponseField name="enderecoDentista" type="string">
+  Formatted address string of the dentist's registered location.
+</ResponseField>
+
+<ResponseField name="dataInicial" type="string (date)">
+  Appointment start date in `YYYY-MM-DD` format.
+</ResponseField>
+
+<ResponseField name="dataFim" type="string or null">
+  Date the appointment was finalized, or `null` if still open.
+</ResponseField>
+
+---
+
+## POST /atendimento
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/atendimento</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Creates a new dental appointment for a registered beneficiary. After validating the request, the service performs a **geographic matching step**: it queries available dentists and, where possible, selects the one whose registered city matches the beneficiary's city. If no city-level match is found, any available dentist may be assigned. The `dataInicial` field is automatically set to the current date (`LocalDate.now()`) regardless of what the caller submits, because the `AtendimentoCreateRequest` record overrides `dataInicial()` in its compact constructor.
+
+### Request body
+
+<ParamField body="prontuario" type="string" required>
+  Clinical notes or initial medical record text for the session. Must be non-blank (`@NotBlank`).
+</ParamField>
+
+<ParamField body="cpfBeneficiario" type="string" required>
+  11-digit CPF of the beneficiary who will receive care. Must be non-blank (`@NotBlank`). The beneficiary must already be registered in the system.
+</ParamField>
+
+<ParamField body="dataInicial" type="string (date)">
+  Intended start date in `YYYY-MM-DD` format. **Note:** this value is ignored server-side — the start date is always set to the current date by the record's overridden accessor. The field is accepted for API compatibility.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/atendimento \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prontuario": "Paciente apresenta dor aguda no molar inferior direito. Indicado canal.",
+    "cpfBeneficiario": "12345678901",
+    "dataInicial": "2024-01-15"
+  }'
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `201 Created` | Appointment created; `Location` header points to the new resource. |
+| `400 Bad Request` | Missing required fields or beneficiary CPF not found. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Role lacks permission. |
+
+<Note>
+  A `201 Created` response includes a `Location` header of the form `api/atendimento/{id}`. The response body is empty for this endpoint — use `GET /atendimento/{cpf}` to retrieve the created record.
+</Note>
+
+---
+
+## GET /atendimento/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/atendimento/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Retrieves the most recent open appointment associated with a beneficiary's CPF. Returns `404 Not Found` if no appointment exists for that CPF.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the beneficiary whose appointment should be retrieved.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/atendimento/12345678901 \
+  -H "Authorization: Bearer <token>"
+```
+
+### Example response
+
+```json
+{
+  "id": 5,
+  "prontuario": "Paciente apresenta dor aguda no molar inferior direito. Indicado canal.",
+  "beneficiario": "Maria da Silva",
+  "dentista": "Dr. Carlos Ferreira",
+  "contatoDentista": "11977776666",
+  "emailDentista": "carlos.ferreira@clinica.com.br",
+  "enderecoDentista": "Av. Rebouças, 500 - São Paulo/SP",
+  "dataInicial": "2024-01-15",
+  "dataFim": null
+}
+```
+
+---
+
+## PUT /atendimento/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>PUT</span>
+  <code>/atendimento/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Finalizes (closes) an open appointment. Sets the `dataFim` timestamp and optionally updates the clinical notes and the responsible collaborator. Once finalized, the appointment is considered complete and will appear with a non-null `dataFim` in subsequent queries.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the beneficiary whose appointment is being finalized.
+</ParamField>
+
+### Request body
+
+<ParamField body="prontuario" type="string">
+  Final or updated clinical notes for the session. Optional — if omitted the existing notes are preserved.
+</ParamField>
+
+<ParamField body="idColaborador" type="integer">
+  ID of the collaborator who is closing the appointment. Optional — records which staff member finalized the session.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT https://api.raizdobem.com.br/atendimento/12345678901 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prontuario": "Canal realizado com sucesso. Retorno agendado para 30 dias.",
+    "idColaborador": 3
+  }'
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Appointment finalized successfully. |
+| `400 Bad Request` | Invalid body. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Role lacks permission. |
+
+---
+
+## GET /atendimento/exportarCsv
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/atendimento/exportarCsv</code>
+  <span style={{ background: "#ef4444", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN only</span>
+</div>
+
+Exports a complete report of all appointments as a UTF-8 CSV file. Restricted to users with the `ADMIN` role. The `Content-Disposition` header triggers a browser download.
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/atendimento/exportarCsv \
+  -H "Authorization: Bearer <admin-token>" \
+  -o Atendimentos_export.csv
+```
+
+### Response headers
+
+```
+Content-Type: text/csv; charset=UTF-8
+Content-Disposition: attachment; filename="Atendimentos_20240115_103000.csv"
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | CSV file returned in response body. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Caller does not have the `ADMIN` role. |

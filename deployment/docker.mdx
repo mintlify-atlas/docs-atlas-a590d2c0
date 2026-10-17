@@ -1,0 +1,110 @@
+---
+title: "Containerize Raiz do Bem API with Docker"
+sidebarTitle: "Docker"
+description: "Build and run the Raiz do Bem API as a Docker container using the JVM fast-jar image or a GraalVM native binary for production deployments."
+---
+
+The Raiz do Bem API ships with three production-ready Dockerfiles inside `src/main/docker/`, each targeting a different runtime strategy. The **JVM build** uses a Red Hat UBI 9 OpenJDK 21 base image and packages the application as a Quarkus fast-jar with four optimized copy layers, making subsequent image rebuilds fast when only application code changes. The **GraalVM native build** compiles the entire application to a self-contained binary with no JVM dependency, dramatically reducing startup time and memory footprint — ideal for auto-scaling production workloads. All containers expose port `8080` and require the same four environment variables used in local development.
+
+<Tabs>
+  <Tab title="JVM Mode (Recommended)">
+
+    The JVM build uses `Dockerfile.jvm`, based on `registry.access.redhat.com/ubi9/openjdk-21-runtime:1.24`. It copies the fast-jar output from `target/quarkus-app/` into four distinct layers (lib, root JARs, app, quarkus), so that library layers are reused across application-only rebuilds.
+
+    **Step 1 — Package the application**
+
+    ```bash
+    ./mvnw clean package -DskipTests
+    ```
+
+    This produces the fast-jar layout under `target/quarkus-app/`.
+
+    **Step 2 — Build the Docker image**
+
+    ```bash
+    docker build \
+      -f src/main/docker/Dockerfile.jvm \
+      -t raiz-do-bem-api:jvm .
+    ```
+
+    **Step 3 — Run the container**
+
+    ```bash
+    docker run -i --rm \
+      -p 8080:8080 \
+      -e DB_URL="jdbc:oracle:thin:@//host:1521/XEPDB1" \
+      -e DB_USUARIO="<seu_usuario>" \
+      -e DB_SENHA="<sua_senha>" \
+      -e GOOGLE_API_KEY="<sua_google_api_key>" \
+      raiz-do-bem-api:jvm
+    ```
+
+    The container starts the application via `/opt/jboss/container/java/run/run-java.sh`, which auto-tunes JVM heap settings based on container memory limits. You can override JVM flags with the `JAVA_OPTS_APPEND` environment variable.
+
+    <Note>
+      Replace the placeholder values for `DB_URL`, `DB_USUARIO`, `DB_SENHA`, and `GOOGLE_API_KEY` with your real credentials. The application will refuse to start if the Oracle datasource is unreachable.
+    </Note>
+
+  </Tab>
+  <Tab title="GraalVM Native">
+
+    The native build compiles the API to a standalone Linux executable using GraalVM's `native-image` tool. The `--container-build` flag delegates compilation to an official GraalVM builder container, so **no local GraalVM installation is required** — only Docker.
+
+    **Step 1 — Compile the native executable**
+
+    ```bash
+    ./mvnw clean package -Dnative -Dquarkus.native.container-build=true
+    ```
+
+    This step is CPU- and memory-intensive and can take several minutes. It produces `target/raiz-do-bem-api-1.0.0-SNAPSHOT-runner`.
+
+    **Step 2 — Build the Docker image**
+
+    ```bash
+    docker build \
+      -f src/main/docker/Dockerfile.native \
+      -t raiz-do-bem-api:native .
+    ```
+
+    The image is based on `registry.access.redhat.com/ubi9/ubi-minimal:9.7` — a minimal Red Hat UBI 9 image with no JVM.
+
+    **Step 3 — Run the container**
+
+    ```bash
+    docker run -i --rm \
+      -p 8080:8080 \
+      -e DB_URL="jdbc:oracle:thin:@//host:1521/XEPDB1" \
+      -e DB_USUARIO="<seu_usuario>" \
+      -e DB_SENHA="<sua_senha>" \
+      -e GOOGLE_API_KEY="<sua_google_api_key>" \
+      raiz-do-bem-api:native
+    ```
+
+    The native executable starts in milliseconds and uses a fraction of the memory required by the JVM build, making it ideal for containerized production environments.
+
+    <Note>
+      `Dockerfile.native-micro` is an alternative that uses `quay.io/quarkus/ubi9-quarkus-micro-image:2.0` as its base — a purpose-built Quarkus micro image that strips everything not required by a native Quarkus binary, resulting in the **smallest possible image size**. Build it with:
+      ```bash
+      docker build \
+        -f src/main/docker/Dockerfile.native-micro \
+        -t raiz-do-bem-api:native-micro .
+      ```
+      The run command and environment variables are identical to `Dockerfile.native`.
+    </Note>
+
+  </Tab>
+</Tabs>
+
+## Port Mapping
+
+All three Dockerfiles expose **port 8080**. The `-p 8080:8080` flag maps the host port directly to the container port. Once running, the following endpoints are available regardless of build mode:
+
+| URL | Description |
+|---|---|
+| `http://localhost:8080` | API base URL |
+| `http://localhost:8080/q/swagger-ui/` | Swagger UI (interactive API docs) |
+| `http://localhost:8080/q/dev-ui/` | Quarkus Dev UI (JVM mode only) |
+
+<Note>
+The Quarkus Dev UI (`/q/dev-ui/`) is not available in native mode or when the application is packaged with `quarkus.package.type=fast-jar` without dev mode. Use the Swagger UI at `/q/swagger-ui/` to explore the API in production containers — it is always included because `quarkus.swagger-ui.always-include=true` is set in `application.properties`.
+</Note>

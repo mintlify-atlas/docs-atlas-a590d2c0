@@ -1,0 +1,137 @@
+---
+title: "Run Raiz do Bem API Locally with Quarkus Dev Mode"
+sidebarTitle: "Local Development"
+description: "Install Java 21, configure four environment variables, and start the API locally using the Maven wrapper with live reload in under five minutes."
+---
+
+The Raiz do Bem API is built on **Java 21 and Quarkus 3.34.5**, giving you a blazing-fast dev loop thanks to Quarkus Dev Mode — a built-in live-reload server that detects code changes and restarts the application on the fly. The project ships with the **Maven Wrapper** (`mvnw` / `mvnw.cmd`) pinned to Apache Maven 3.9.12, so you do not need to install Maven globally. All you need is a Java 21 JDK and the four environment variables that wire the API to its external dependencies: an Oracle database and the Google Maps Routes API.
+
+<Steps>
+
+<Step title="Install Java 21 JDK">
+
+The only required tool is a **Java 21 JDK**. You can verify your current version with:
+
+```bash
+java -version
+```
+
+The output should report `openjdk 21` (or any Java 21-compatible distribution such as Eclipse Temurin, Oracle JDK 21, or GraalVM 21). Maven itself is **not required** — the repository bundles the Maven Wrapper at version 3.9.12.
+
+<Note>
+The Oracle Database is an **external service** and is not embedded in the application. You must have access to a running Oracle instance (local or remote) before the API can start. There is no in-memory fallback — `application.properties` configures `quarkus.datasource.db-kind=oracle` and resolves the JDBC URL, username, and password entirely from environment variables.
+</Note>
+
+</Step>
+
+<Step title="Configure Environment Variables">
+
+The API reads all sensitive configuration from four environment variables. Set them in your shell before running any Maven command.
+
+| Variable | Description |
+|---|---|
+| `DB_URL` | Full JDBC connection string to the Oracle database (e.g. `jdbc:oracle:thin:@//host:1521/service`). Mapped to `quarkus.datasource.jdbc.url`. |
+| `DB_USUARIO` | Oracle database username. Mapped to `quarkus.datasource.username`. |
+| `DB_SENHA` | Oracle database password. Mapped to `quarkus.datasource.password`. |
+| `GOOGLE_API_KEY` | Google Cloud API key with the **Routes API** enabled. Used by `GoogleMapsClient` to compute real driving distances for geographic dentist matching. |
+
+<Tabs>
+  <Tab title="Linux / macOS">
+    ```bash
+    export DB_URL="jdbc:oracle:thin:@//localhost:1521/XEPDB1"
+    export DB_USUARIO="<seu_usuario>"
+    export DB_SENHA="<sua_senha>"
+    export GOOGLE_API_KEY="<sua_google_api_key>"
+    ```
+  </Tab>
+  <Tab title="Windows PowerShell">
+    ```powershell
+    $env:DB_URL="jdbc:oracle:thin:@//localhost:1521/XEPDB1"
+    $env:DB_USUARIO="<seu_usuario>"
+    $env:DB_SENHA="<sua_senha>"
+    $env:GOOGLE_API_KEY="<sua_google_api_key>"
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+To avoid re-exporting variables on every terminal session, add them to your shell profile (`~/.bashrc`, `~/.zshrc`) or a `.env` file loaded by your IDE. Never commit credentials to source control.
+</Tip>
+
+</Step>
+
+<Step title="Start Quarkus Dev Mode">
+
+With the environment variables set, launch the API using the bundled Maven Wrapper:
+
+<Tabs>
+  <Tab title="Linux / macOS">
+    ```bash
+    ./mvnw quarkus:dev
+    ```
+  </Tab>
+  <Tab title="Windows PowerShell">
+    ```powershell
+    .\mvnw.cmd quarkus:dev
+    ```
+  </Tab>
+</Tabs>
+
+Quarkus Dev Mode provides:
+
+- **Live reload** — any change to Java source files, resources, or `application.properties` triggers an automatic recompile and restart, usually in under one second.
+- **Auto-restart on save** — no need to stop and rerun the process manually during development.
+- **CDI and REST hot-swap** — new endpoints and service beans are wired without a full JVM restart.
+
+The first startup downloads dependencies from Maven Central (one-time). Subsequent starts use the local `.m2` cache and are significantly faster.
+
+</Step>
+
+<Step title="Access the Running API">
+
+Once Quarkus prints `Listening on: http://0.0.0.0:8080`, the following URLs are available:
+
+| URL | Purpose |
+|---|---|
+| `http://localhost:8080` | API base URL — all REST endpoints under their respective resource paths |
+| `http://localhost:8080/q/swagger-ui/` | Interactive Swagger UI powered by SmallRye OpenAPI — explore and call every endpoint |
+| `http://localhost:8080/q/dev-ui/` | Quarkus Dev UI — inspect CDI beans, caches, configuration, and extensions at runtime |
+
+<Note>
+The Swagger UI is configured with `quarkus.swagger-ui.always-include=true` and uses the `original` theme. It is available in **all** profiles, including production builds, so it is always reachable at `/q/swagger-ui/` after deployment.
+</Note>
+
+</Step>
+
+<Step title="Run the Test Suite">
+
+The API ships with **285 unit tests** built with JUnit 5, Mockito 5.18, and AssertJ 3.27. Run the full suite with:
+
+<Tabs>
+  <Tab title="Linux / macOS">
+    ```bash
+    ./mvnw clean test
+    ```
+  </Tab>
+  <Tab title="Windows PowerShell">
+    ```powershell
+    .\mvnw.cmd clean test
+    ```
+  </Tab>
+</Tabs>
+
+A successful run reports **0 failures, 0 errors** across all 285 tests. The JaCoCo code coverage plugin (version 0.8.11) runs automatically during the `test` phase and generates an HTML report at:
+
+```
+target/site/jacoco/index.html
+```
+
+Open that file in your browser to inspect line-by-line coverage across all layers — services, resources, mappers, exception handlers, and utilities.
+
+<Tip>
+Tests are fully isolated from external services. All `GoogleMapsClient` and `ViaCepClient` calls are replaced with Mockito mocks, so the suite runs without a database or network connection.
+</Tip>
+
+</Step>
+
+</Steps>

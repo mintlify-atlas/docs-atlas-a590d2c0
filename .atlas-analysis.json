@@ -1,0 +1,138 @@
+{
+  "projectType": "api-service",
+  "projectName": "Raiz do Bem API",
+  "projectDescription": "A RESTful backend API built with Java 21 and Quarkus for the Raiz do Bem platform, managing dental care beneficiaries, volunteer dentists, appointments, and social programs for an NGO.",
+  "theme": "luma",
+  "primaryColor": "#ca4535",
+  "lightColor": "#d5a494",
+  "darkColor": "#ede6e3",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/domain-model",
+              "concepts/geographic-match"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/local",
+              "deployment/docker",
+              "deployment/azure-cicd"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth"
+            ]
+          },
+          {
+            "group": "Core Resources",
+            "pages": [
+              "api/beneficiarios",
+              "api/dentistas",
+              "api/atendimentos",
+              "api/pedidos-ajuda"
+            ]
+          },
+          {
+            "group": "Supporting Resources",
+            "pages": [
+              "api/colaboradores",
+              "api/enderecos",
+              "api/especialidades",
+              "api/programas-sociais"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "api/data-models",
+              "api/error-handling"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "JWT authentication with RSA-256 key pairs and refresh token support",
+    "Role-based access control (ADMIN and COLABORADOR roles)",
+    "Geographic matching algorithm using Google Maps Routes API to pair beneficiaries with nearest available dentist",
+    "Address enrichment via ViaCEP REST client integration",
+    "Paginated responses with a generic PageResponse<T> envelope",
+    "In-memory caching with Quarkus Cache (Caffeine) and write-through invalidation",
+    "CSV export for beneficiaries, dentists, and appointments",
+    "Oracle Database persistence with Hibernate ORM + Panache",
+    "285 unit tests with JUnit 5, Mockito 5, AssertJ and JaCoCo coverage",
+    "Docker support with JVM and GraalVM native image Dockerfiles",
+    "Azure Pipelines CI/CD pipeline deploying to Azure App Service"
+  ],
+  "publicApiSurface": [
+    "POST /auth/tokenAcesso",
+    "POST /auth/refreshToken",
+    "GET /beneficiario",
+    "POST /beneficiario",
+    "GET /beneficiario/{cpf}",
+    "GET /beneficiario/cidade/{cidade}",
+    "GET /beneficiario/programa/{idProgramaSocial}",
+    "GET /beneficiario/exportarCsv",
+    "PUT /beneficiario/{cpf}",
+    "DELETE /beneficiario/{cpf}",
+    "GET /dentista",
+    "POST /dentista",
+    "GET /dentista/disponiveis",
+    "GET /dentista/{cpf}",
+    "GET /dentista/cidade/{cidade}",
+    "GET /dentista/exportarCsv",
+    "PUT /dentista/{cpf}",
+    "DELETE /dentista/{cpf}",
+    "GET /atendimento",
+    "POST /atendimento",
+    "GET /atendimento/{cpf}",
+    "GET /atendimento/exportarCsv",
+    "PUT /atendimento/{cpf}",
+    "DELETE /atendimento/{id}",
+    "POST /pedido-ajuda",
+    "GET /pedido-ajuda",
+    "GET /pedido-ajuda/data/{data}",
+    "PUT /pedido-ajuda/{id}",
+    "DELETE /pedido-ajuda/{id}",
+    "GET /colaborador",
+    "POST /colaborador",
+    "GET /colaborador/{cpf}",
+    "PUT /colaborador/{cpf}",
+    "DELETE /colaborador/{cpf}",
+    "POST /endereco",
+    "GET /endereco",
+    "GET /endereco/{cidade}",
+    "GET /endereco/id/{id}",
+    "GET /endereco/viacep/{cep}",
+    "PUT /endereco/{id}",
+    "DELETE /endereco/{id}",
+    "GET /especialidades",
+    "GET /especialidades/{id}",
+    "GET /programas-sociais",
+    "GET /programas-sociais/{id}"
+  ]
+}

@@ -1,0 +1,219 @@
+---
+title: "Authenticate with Raiz do Bem API Using JWT"
+sidebarTitle: "Authentication"
+description: "Obtain RSA-256 signed JWT access and refresh tokens from /auth/tokenAcesso and include them as Bearer tokens in protected API requests."
+---
+
+Every protected endpoint in the Raiz do Bem API requires a **JWT Bearer token** issued by the server itself. Authentication is powered by **SmallRye JWT** with an asymmetric **RSA-256 key pair** — the server signs tokens with a private key (`keyPrivada.pem`) and validates incoming tokens against the corresponding public key (`keyPublica.pem`), configured via `mp.jwt.verify.publickey.location` and `smallrye.jwt.sign.key.location` in `application.properties`. The auth flow produces two tokens: a short-lived **access token** for API calls and a longer-lived **refresh token** for renewing sessions without re-entering credentials.
+
+## How Authentication Works
+
+```text
+Client                          Raiz do Bem API
+  │                                    │
+  │  POST /auth/tokenAcesso            │
+  │  { "email": "...", "senha": "..." }│
+  │ ──────────────────────────────────►│
+  │                                    │  1. Look up Colaborador by email
+  │                                    │  2. Verify senha with BcryptUtil.matches()
+  │                                    │  3. Sign accessToken  (30 min, RSA-256)
+  │                                    │  4. Sign refreshToken (7 days, RSA-256)
+  │  { "token": "...",                 │
+  │    "refreshToken": "...",          │
+  │    "tipo": "BearerToken" }         │
+  │ ◄──────────────────────────────────│
+  │                                    │
+  │  GET /beneficiario                 │
+  │  Authorization: Bearer <token>     │
+  │ ──────────────────────────────────►│
+  │                                    │  5. Verify JWT signature + issuer
+  │                                    │  6. Enforce @RolesAllowed RBAC
+  │  200 OK { "conteudo": [...] }      │
+  │ ◄──────────────────────────────────│
+```
+
+Passwords are **never stored in plain text**. The `ColaboradorService` hashes every password with `BcryptUtil.bcryptHash` (Elytron Security) before persisting it, and `BcryptUtil.matches()` is used on every login attempt. Passwords are also **omitted from all response DTOs**.
+
+---
+
+## POST /auth/tokenAcesso
+
+Authenticates a collaborator using their email and password and returns a pair of RSA-256 signed JWT tokens.
+
+<Note>
+  This endpoint is annotated with `@PermitAll` — it is fully **public** and does not require an existing token to call.
+</Note>
+
+### Request Body
+
+<ParamField body="email" type="string" required>
+  The collaborator's registered email address. Used as the JWT `subject` claim.
+</ParamField>
+
+<ParamField body="senha" type="string" required>
+  The collaborator's plain-text password. Verified against the Bcrypt hash stored in the database. Never logged or persisted beyond the verification step.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -s -X POST http://localhost:8080/auth/tokenAcesso \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@raizdobem.com.br",
+    "senha": "suaSenha123"
+  }'
+```
+
+### Example Response — `200 OK`
+
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJyYWl6LWRvLWJlbSIsInN1YiI6ImFkbWluQHJhaXpkb2JlbS5jb20uYnIiLCJub21lIjoiQWRtaW4gUmFpeiIsImdyb3VwcyI6WyJBRE1JTiJdLCJleHAiOjE3MzAwMDAwMDB9...",
+  "refreshToken": "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJyYWl6LWRvLWJlbSIsInN1YiI6ImFkbWluQHJhaXpkb2JlbS5jb20uYnIiLCJ0eXBlIjoicmVmcmVzaCIsImV4cCI6MTczMDYwNDgwMH0...",
+  "tipo": "BearerToken"
+}
+```
+
+### Response Fields
+
+<ResponseField name="token" type="string">
+  RSA-256 signed JWT access token. Valid for **30 minutes**. Include this value as a Bearer token in the `Authorization` header of every protected request. Contains the `nome` claim (collaborator's full name) and `groups` claim (role).
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  RSA-256 signed JWT refresh token. Valid for **7 days**. Contains a `type: "refresh"` claim that distinguishes it from access tokens. Use this to obtain a new token pair without re-entering credentials.
+</ResponseField>
+
+<ResponseField name="tipo" type="string">
+  Always `"BearerToken"`. Indicates the token scheme to use in the `Authorization` header.
+</ResponseField>
+
+### Error Responses
+
+| HTTP Status | Condition |
+| :---: | :--- |
+| `422 Unprocessable Entity` | Email not found in the database, or the password does not match the stored Bcrypt hash. Returns `{ "statusCode": 422, "mensagem": "Email ou senha inválido(s).", "timestamp": "..." }`. |
+
+---
+
+## POST /auth/refreshToken
+
+Validates an existing refresh token and issues a new access token + refresh token pair. The old refresh token becomes invalid after this call.
+
+<Note>
+  This endpoint is also annotated with `@PermitAll` — it is **public** and does not require the expired access token to be presented. Only the refresh token is needed.
+</Note>
+
+### Request Body
+
+<ParamField body="refreshToken" type="string" required>
+  A valid, non-expired refresh token previously issued by `POST /auth/tokenAcesso` or a prior call to this endpoint. The `@NotBlank` constraint is enforced — an empty or missing value returns `400 Bad Request`.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -s -X POST http://localhost:8080/auth/refreshToken \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJyYWl6LWRvLWJlbSIsInN1YiI6ImFkbWluQHJhaXpkb2JlbS5jb20uYnIiLCJ0eXBlIjoicmVmcmVzaCIsImV4cCI6MTczMDYwNDgwMH0..."
+  }'
+```
+
+### Example Response — `200 OK`
+
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiJ9...",
+  "refreshToken": "eyJhbGciOiJSUzI1NiJ9...",
+  "tipo": "BearerToken"
+}
+```
+
+### Error Responses
+
+| HTTP Status | Condition |
+| :---: | :--- |
+| `400 Bad Request` | `refreshToken` field is blank or missing (`@NotBlank` violation). |
+| `401 Unauthorized` | Token signature is invalid, token has expired, the `type` claim is not `"refresh"`, or the collaborator no longer exists in the database. |
+
+---
+
+## Using the Token in API Requests
+
+Include the access token returned in the `"token"` field as a **Bearer token** in the `Authorization` header of every protected request:
+
+```bash
+Authorization: Bearer <token>
+```
+
+### Full Example
+
+```bash
+curl -s -X GET "http://localhost:8080/beneficiario?pagina=0&size=20" \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9..."
+```
+
+<Warning>
+  Omitting the `Authorization` header on a protected endpoint returns `401 Unauthorized`. Presenting a token with an insufficient role returns `403 Forbidden`.
+</Warning>
+
+---
+
+## Role-Based Access Control (RBAC)
+
+Every endpoint in the API is protected by declarative role annotations. There are two internal roles:
+
+### ADMIN
+
+Full administrative privileges. Collaborators with the `ADMIN` role can access all endpoints, including sensitive and destructive operations:
+
+- All `COLABORADOR` operations (read, create, update across all resources).
+- **CSV exports** for beneficiaries (`GET /beneficiario/exportarCsv`) and appointments (`GET /atendimento/exportarCsv`).
+- **Delete operations** across all resources: `DELETE /beneficiario/{cpf}`, `DELETE /dentista/{cpf}`, `DELETE /atendimento/{id}`, `DELETE /pedido-ajuda/{id}`, `DELETE /colaborador/{cpf}`.
+- **Collaborator management**: `POST /colaborador`, `PUT /colaborador/{cpf}`, `DELETE /colaborador/{cpf}`.
+
+### COLABORADOR
+
+Operational access for day-to-day NGO work. Collaborators with this role can:
+
+- Read, create, and update beneficiaries, dentists, appointments, addresses, and help requests.
+- Process help request triage (`PUT /pedido-ajuda/{id}`).
+- Export the dentist CSV (`GET /dentista/exportarCsv`).
+- Read collaborator profiles (`GET /colaborador`, `GET /colaborador/{cpf}`).
+
+### Public Endpoints (`@PermitAll`)
+
+Some endpoints require no authentication at all and are openly accessible to any client:
+
+<Note>
+  The following endpoints are annotated with `@PermitAll` and accept requests without any `Authorization` header:
+
+  - `POST /auth/tokenAcesso` — Collaborator login.
+  - `POST /auth/refreshToken` — Token renewal.
+  - `POST /pedido-ajuda` — Public submission of a help request (beneficiaries apply here without an account).
+  - `GET /especialidades` and `GET /especialidades/{id}` — Dental specialty catalog.
+  - `GET /programas-sociais` and `GET /programas-sociais/{id}` — Social program listings (*Dentista do Bem* and *Apolônias do Bem*).
+</Note>
+
+---
+
+## Token Expiry and Refresh Strategy
+
+| Token | Lifetime | Use |
+| :--- | :---: | :--- |
+| **Access Token** (`token`) | 30 minutes | Passed in `Authorization: Bearer` on every API call. |
+| **Refresh Token** (`refreshToken`) | 7 days | Sent to `POST /auth/refreshToken` to get a new token pair before the access token expires. |
+
+**Recommended client strategy:**
+
+1. On login, store both tokens securely (e.g., in memory or a secure cookie — never in `localStorage`).
+2. On every API response, check for a `401 Unauthorized` status.
+3. On `401`, call `POST /auth/refreshToken` with the stored refresh token.
+4. If that call succeeds, retry the original request with the new access token.
+5. If the refresh call also returns `401` (refresh token expired or revoked), redirect the user to log in again.
+
+<Tip>
+  The access token carries the `nome` claim (collaborator's full name) and the `groups` claim (role). You can decode the JWT payload client-side (it is Base64url-encoded) to display the user's name or conditionally render UI elements based on their role — without making an extra API call.
+</Tip>

@@ -1,0 +1,225 @@
+---
+title: "Raiz do Bem API Layered Architecture"
+sidebarTitle: "Architecture"
+description: "Explore the four-layer architecture of Raiz do Bem API: Resource, Service, Repository, and External Clients, with CDI scopes, caching, and exception handling."
+---
+
+The Raiz do Bem API is structured around a strict **Layered Architecture** that enforces high cohesion and low coupling across the entire codebase. Each layer has a single, well-defined responsibility: the Resource layer owns the HTTP contract, the Service layer enforces business rules, the Repository layer handles persistence through Panache ORM, and the External Clients layer isolates third-party integrations behind MicroProfile REST Client interfaces. This design guarantees that no infrastructure detail leaks upward and that each layer can be tested, replaced, or scaled independently.
+
+## Architecture Diagram
+
+The following diagram (from the project README) illustrates the complete request path from consumer to database and external APIs:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          CONSUMIDORES / FRONT-END                       │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │ HTTPS / JSON (Bearer JWT)
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. RESOURCE LAYER (REST / JAX-RS)                    [@RequestScoped]   │
+│    • Validação de entrada (@Valid), Paginação, Controle de Acesso RBAC  │
+│    • Tratamento Global de Exceções (ExceptionsMapperGlobal)             │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │ DTOs (Request / Response)
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. SERVICE LAYER (Regras de Negócio)             [@ApplicationScoped]   │
+│    • Transações (@Transactional), Cache (@CacheResult/@CacheInvalidate) │
+│    • Conversão segura via Mappers dedicados e Validações de Domínio     │
+└──────────────────┬───────────────────────────────────┬──────────────────┘
+                   │ Entidades JPA                     │ MicroProfile REST Client
+                   ▼                                   ▼
+┌─────────────────────────────────────┐ ┌─────────────────────────────────┐
+│ 3. REPOSITORY LAYER (Panache ORM)   │ │ 4. EXTERNAL CLIENTS             │
+│    • Consultas otimizadas e         │ │    • ViaCepClient (CEP)         │
+│      Paginação (PanacheQuery/Page)  │ │    • GoogleMapsClient (Rotas)   │
+└──────────────────┬──────────────────┘ └──────────────┬──────────────────┘
+                   │ JDBC                              │ HTTPS
+                   ▼                                   ▼
+┌─────────────────────────────────────┐ ┌─────────────────────────────────┐
+│ 5. ENTITY / DATABASE LAYER          │ │ APIs Externas                   │
+│    • Oracle Database                │ │    • ViaCEP / Google Maps API   │
+└─────────────────────────────────────┘ └─────────────────────────────────┘
+```
+
+## The Four Layers
+
+<CardGroup cols={2}>
+  <Card title="Resource Layer" icon="plug">
+    JAX-RS endpoints annotated with `@RequestScoped`. Responsible for parsing and validating incoming HTTP payloads via `@Valid`, enforcing RBAC with `@RolesAllowed`, applying pagination parameters, and delegating to the Service layer using DTOs — never exposing JPA entities directly.
+  </Card>
+  <Card title="Service Layer" icon="gear">
+    Annotated with `@ApplicationScoped` and `@Transactional`. Contains all business rules, entity-to-DTO mapping via dedicated Mappers, cache management (`@CacheResult` / `@CacheInvalidateAll`), and orchestration of external client calls (Google Maps, ViaCEP).
+  </Card>
+  <Card title="Repository Layer" icon="database">
+    Built on **Hibernate ORM with Panache**. Uses `PanacheQuery<E>` and `Page.of(pagina, tamanho)` for efficient database pagination over Oracle. Services inject repository methods and never write JPQL inline outside of repository classes.
+  </Card>
+  <Card title="External Clients" icon="cloud">
+    Two MicroProfile REST Client interfaces — `ViaCepClient` (CEP enrichment) and `GoogleMapsClient` (route distance matrix) — registered with `@RegisterRestClient`. They are injected exclusively into Service-layer beans, keeping external I/O invisible to Resources.
+  </Card>
+</CardGroup>
+
+## CDI Scopes
+
+Quarkus ArC (the compile-time CDI implementation) generates optimized proxies at build time. The scope choices in Raiz do Bem are deliberate:
+
+<Tabs>
+  <Tab title="@RequestScoped — Resource Layer">
+    Each HTTP request gets its own Resource instance. This scope is the correct choice for JAX-RS endpoints because it naturally aligns the bean lifecycle with a single request context, preventing state from leaking between concurrent requests.
+
+    ```java
+    @RequestScoped
+    @Path("/beneficiario")
+    public class BeneficiarioResource { ... }
+    ```
+  </Tab>
+  <Tab title="@ApplicationScoped — Service & Repository">
+    Services and repositories are singletons managed by the CDI container. Because they hold no mutable per-request state — transactions are managed by `@Transactional` at the method boundary — a single instance serves all concurrent requests efficiently, reducing memory overhead and startup latency.
+
+    ```java
+    @ApplicationScoped
+    public class BeneficiarioService { ... }
+    ```
+  </Tab>
+</Tabs>
+
+## Global Exception Handling
+
+`ExceptionsMapperGlobal` is a JAX-RS `@Provider` that implements `ExceptionMapper<Exception>`, acting as a catch-all interceptor for every exception the application throws. It guarantees that no stack trace or infrastructure detail is ever exposed to the API consumer; every error is serialized as the immutable `ErroResponse` record.
+
+```java
+@Provider
+@Produces(MediaType.APPLICATION_JSON)
+public class ExceptionsMapperGlobal implements ExceptionMapper<Exception> {
+    private static final Logger LOG = Logger.getLogger(ExceptionsMapperGlobal.class);
+
+    @Override
+    public Response toResponse(Exception e) {
+        if (e instanceof NaoEncontradoException)
+            return Response.status(404)
+                .entity(new ErroResponse(404, e.getMessage(), LocalDateTime.now()))
+                .build();
+        // ... further mappings
+    }
+}
+```
+
+The standardized error body looks like this:
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Beneficiário não encontrado.",
+  "timestamp": "2026-10-17T10:30:00"
+}
+```
+
+Every exception type maps to a specific HTTP status code:
+
+| Exception | HTTP Status | Semantic |
+|:---|:---:|:---|
+| `RequisicaoInvalidaException` / `ConstraintViolationException` | **400** | Malformed payload, missing parameters, or `@Valid` Bean Validation failure. |
+| `NaoEncontradoException` | **404** | Requested resource (CPF, ID, CEP, or city) does not exist in the database or external service. |
+| `RegraNegocioException` | **409** | Business integrity conflict — for example, a duplicate registration attempt. |
+| `ValidacaoException` | **422** | Syntactically valid data that violates domain rules — for example, an invalid CPF check digit. |
+| `Exception` (safe fallback) | **500** | Unexpected error logged internally via JBoss Logger; generic message returned to the consumer. |
+
+<Note>
+  The `WebApplicationException` branch handles JAX-RS framework exceptions (e.g. `404 Not Found` from path routing) and passes them through with a clean `ErroResponse` body rather than the default HTML Quarkus error page.
+</Note>
+
+## Caching Strategy
+
+High-frequency paginated read operations are accelerated with **Quarkus Cache** backed by Caffeine. Each service that supports cache declares a named cache and uses two annotations:
+
+- **`@CacheResult(cacheName = "...")`** — on list/query methods, so repeated calls with the same parameters are served from memory.
+- **`@CacheInvalidateAll(cacheName = "...")`** — on every write operation (`criar`, `atualizar`, `excluir`, `processarPedido`, `encerrarAtendimento`) to guarantee write-through invalidation and prevent stale reads.
+
+The five named caches in use are:
+
+| Cache Name | Owning Service |
+|:---|:---|
+| `beneficiarios` | `BeneficiarioService` |
+| `dentistas` | `DentistaService` |
+| `atendimento` | `AtendimentoService` |
+| `pedido-ajuda` | `PedidoAjudaService` |
+| `colaborador` | `ColaboradorService` |
+
+<Tip>
+  Because `@CacheInvalidateAll` is applied to every mutating operation, cache consistency is automatic — no manual eviction logic is needed.
+</Tip>
+
+## Pagination with `PageResponse<T>`
+
+All primary listings (`GET /recurso?pagina=0&size=20`) return a generic envelope defined as a Java record:
+
+```java
+public record PageResponse<T>(
+    List<T> conteudo,
+    int pagina,
+    int tamanho,
+    long totalElementos,
+    int totalPaginas
+) {}
+```
+
+An example JSON response for a paginated beneficiary listing:
+
+```json
+{
+  "conteudo": [ { "cpf": "12345678901", "nomeCompleto": "Maria Silva", "..." } ],
+  "pagina": 0,
+  "tamanho": 20,
+  "totalElementos": 142,
+  "totalPaginas": 8
+}
+```
+
+<Note>
+  Non-paginated legacy routes are preserved under the `/legado` suffix with `@Operation(hidden = true)` so that existing integrations and CSV export endpoints are not broken.
+</Note>
+
+## External Integrations
+
+Both external clients are registered as MicroProfile REST Client interfaces and injected exclusively into Service-layer beans.
+
+<Tabs>
+  <Tab title="ViaCepClient">
+    Resolves and enriches address data (street name, neighborhood, city, state) from a Brazilian postal code.
+
+    ```java
+    @RegisterRestClient(configKey = "via-cep-api")
+    @Path("/")
+    public interface ViaCepClient {
+
+        @GET
+        @Path("/{cep}/json/")
+        ViaCepDTO buscarEndereco(@PathParam("cep") String cep);
+    }
+    ```
+  </Tab>
+  <Tab title="GoogleMapsClient">
+    Computes real road distances between a beneficiary's address and multiple dentist addresses using the Google Maps Routes API `computeRouteMatrix` endpoint.
+
+    ```java
+    @RegisterRestClient(configKey = "google-maps-api")
+    @Path("/")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    public interface GoogleMapsClient {
+
+        @POST
+        @Path("/distanceMatrix/v2:computeRouteMatrix")
+        List<GoogleMapsResponseDTO> buscarRotas(
+            @HeaderParam("X-Goog-Api-Key") String apiKey,
+            @HeaderParam("X-Goog-FieldMask") String camposNecessarios,
+            GoogleMapsRequestDTO request);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  The `GOOGLE_API_KEY` environment variable must be set before starting the application. The Google Cloud project must have the **Routes API** enabled for `computeRouteMatrix` calls to succeed.
+</Warning>

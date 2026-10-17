@@ -1,0 +1,253 @@
+---
+title: "Collaborators API: Manage NGO Staff Accounts"
+sidebarTitle: "Colaboradores"
+description: "CRUD endpoints for NGO collaborators — create with Bcrypt-hashed passwords, list paginated, look up by CPF, update email, and delete accounts."
+---
+
+The Colaboradores API manages the internal staff accounts of the Raiz do Bem NGO. Each collaborator receives a role (`ADMIN` or `COLABORADOR`) and authenticates via JWT. Passwords submitted at creation are immediately hashed using **Bcrypt** and are never stored in plain text — the `senha` field is intentionally omitted from every response. The `POST` and `DELETE` operations are restricted to the `ADMIN` role; listing and look-up endpoints are accessible to both roles.
+
+---
+
+## Endpoints
+
+### Create a Collaborator
+
+<ParamField path="POST /colaborador" type="endpoint" />
+
+Creates a new NGO collaborator account. **Requires `ADMIN` role.** The `senha` field is hashed with Bcrypt before persistence. On success the server returns `201 Created` with the new collaborator's data (password excluded).
+
+**Request body**
+
+<ParamField body="cpf" type="string" required>
+  Brazilian tax ID — exactly 11 numeric digits (e.g. `"12345678901"`). Must pass the two-digit Luhn-style verification performed by `CpfValidatorUtil`.
+</ParamField>
+
+<ParamField body="nomeCompleto" type="string" required>
+  Full name of the collaborator. Must not be blank.
+</ParamField>
+
+<ParamField body="dataNascimento" type="string (date)">
+  Date of birth in `YYYY-MM-DD` format (e.g. `"1990-05-20"`).
+</ParamField>
+
+<ParamField body="dataContratacao" type="string (date)">
+  Hire date in `YYYY-MM-DD` format (e.g. `"2024-01-15"`).
+</ParamField>
+
+<ParamField body="email" type="string">
+  Valid e-mail address. Validated via Jakarta `@Email`.
+</ParamField>
+
+<ParamField body="senha" type="string">
+  Plain-text password supplied at creation. Stored only as a Bcrypt hash; **never returned in any response**.
+</ParamField>
+
+<ParamField body="role" type="string">
+  Access role for the account. Accepted values: `ADMIN` or `COLABORADOR`. Defaults to `COLABORADOR` if omitted.
+</ParamField>
+
+```bash
+curl -X POST https://api.raizdobem.org/colaborador \
+  -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cpf": "12345678901",
+    "nomeCompleto": "Maria Silva",
+    "dataNascimento": "1990-05-20",
+    "dataContratacao": "2024-01-15",
+    "email": "maria.silva@raizdobem.org",
+    "senha": "S3nh@Segura!",
+    "role": "COLABORADOR"
+  }'
+```
+
+**Response — `201 Created`**
+
+<ResponseField name="id" type="number">
+  Auto-generated surrogate key for the collaborator record.
+</ResponseField>
+
+<ResponseField name="cpf" type="string">
+  The collaborator's CPF exactly as submitted.
+</ResponseField>
+
+<ResponseField name="nomeCompleto" type="string">
+  Full name of the collaborator.
+</ResponseField>
+
+<ResponseField name="dataNascimento" type="string (date)">
+  Date of birth in `YYYY-MM-DD` format.
+</ResponseField>
+
+<ResponseField name="dataContratacao" type="string (date)">
+  Hire date in `YYYY-MM-DD` format.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Registered e-mail address.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  Assigned access role (`ADMIN` or `COLABORADOR`).
+</ResponseField>
+
+```json
+{
+  "id": 7,
+  "cpf": "12345678901",
+  "nomeCompleto": "Maria Silva",
+  "dataNascimento": "1990-05-20",
+  "dataContratacao": "2024-01-15",
+  "email": "maria.silva@raizdobem.org",
+  "role": "COLABORADOR"
+}
+```
+
+---
+
+### List Collaborators (Paginated)
+
+<ParamField path="GET /colaborador" type="endpoint" />
+
+Returns a paginated list of all registered collaborators. Accessible to both `ADMIN` and `COLABORADOR` roles. Results are wrapped in a `PageResponse<ColaboradorResponse>` envelope — see [Data Models](/api/data-models) for the pagination schema.
+
+**Query parameters**
+
+<ParamField query="pagina" type="integer" default="0">
+  Zero-based page index.
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Maximum number of records per page.
+</ParamField>
+
+```bash
+curl "https://api.raizdobem.org/colaborador?pagina=0&size=10" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`**
+
+```json
+{
+  "conteudo": [
+    {
+      "id": 1,
+      "cpf": "12345678901",
+      "nomeCompleto": "Maria Silva",
+      "dataNascimento": "1990-05-20",
+      "dataContratacao": "2024-01-15",
+      "email": "maria.silva@raizdobem.org",
+      "role": "COLABORADOR"
+    }
+  ],
+  "pagina": 0,
+  "tamanho": 10,
+  "totalElementos": 1,
+  "totalPaginas": 1
+}
+```
+
+---
+
+### Get Collaborator by CPF
+
+<ParamField path="GET /colaborador/{cpf}" type="endpoint" />
+
+Retrieves a single collaborator identified by their CPF. Accessible to both `ADMIN` and `COLABORADOR` roles. Returns `404` if no collaborator with the given CPF exists.
+
+**Path parameter**
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the collaborator to look up.
+</ParamField>
+
+```bash
+curl "https://api.raizdobem.org/colaborador/12345678901" \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": 1,
+  "cpf": "12345678901",
+  "nomeCompleto": "Maria Silva",
+  "dataNascimento": "1990-05-20",
+  "dataContratacao": "2024-01-15",
+  "email": "maria.silva@raizdobem.org",
+  "role": "COLABORADOR"
+}
+```
+
+---
+
+### Update Collaborator Email / Password
+
+<ParamField path="PUT /colaborador/{cpf}" type="endpoint" />
+
+Updates the `email` and/or `senha` of a collaborator identified by their CPF. **Requires `ADMIN` role.** If `senha` is provided it is re-hashed with Bcrypt before storage. Returns `200 OK` with an empty body on success.
+
+**Path parameter**
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the collaborator to update.
+</ParamField>
+
+**Request body**
+
+<ParamField body="email" type="string">
+  New e-mail address to assign to the collaborator.
+</ParamField>
+
+<ParamField body="senha" type="string">
+  New plain-text password. Will be Bcrypt-hashed before storage.
+</ParamField>
+
+```bash
+curl -X PUT "https://api.raizdobem.org/colaborador/12345678901" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "novo.email@raizdobem.org",
+    "senha": "NovaS3nh@!"
+  }'
+```
+
+---
+
+### Delete Collaborator
+
+<ParamField path="DELETE /colaborador/{cpf}" type="endpoint" />
+
+Permanently removes a collaborator account. **Requires `ADMIN` role.** Returns `204 No Content` on success. Throws `NaoEncontradoException` (→ `404`) when the CPF does not match any record.
+
+**Path parameter**
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the collaborator to delete.
+</ParamField>
+
+```bash
+curl -X DELETE "https://api.raizdobem.org/colaborador/12345678901" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
+
+**Response — `204 No Content`** (empty body)
+
+---
+
+## Security Summary
+
+| Endpoint | Method | Required Role |
+|---|---|---|
+| `/colaborador` | `POST` | `ADMIN` |
+| `/colaborador` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/colaborador/{cpf}` | `GET` | `ADMIN`, `COLABORADOR` |
+| `/colaborador/{cpf}` | `PUT` | `ADMIN` |
+| `/colaborador/{cpf}` | `DELETE` | `ADMIN` |
+
+<Note>
+  Passwords are hashed with Bcrypt at write time. The `senha` field is present only on `POST` and `PUT` request bodies — it is **never** included in any response, regardless of caller role.
+</Note>

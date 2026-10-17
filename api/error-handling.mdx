@@ -1,0 +1,177 @@
+---
+title: "Error Handling: HTTP Status Codes and Error Responses"
+sidebarTitle: "Error Handling"
+description: "All API errors follow a standard ErroResponse format. Understand the five exception types mapped to HTTP 400, 404, 409, 422, and 500 status codes."
+---
+
+Every error produced by the Raiz do Bem API — whether from a failed bean validation, a missing database record, a business-rule violation, or an unexpected fault — is captured by a single Quarkus `@Provider` class called `ExceptionsMapperGlobal`. This class implements `ExceptionMapper<Exception>`, which means it intercepts **every unhandled exception** in the JAX-RS layer and converts it into a consistent `ErroResponse` JSON body before the response reaches the client. There is no need to handle raw stack traces or HTML error pages: every non-2xx response from this API has the same predictable JSON shape.
+
+---
+
+## The Global Exception Mapper
+
+`ExceptionsMapperGlobal` is registered as a JAX-RS `@Provider` and produces `application/json`. Its `toResponse(Exception e)` method evaluates the exception type in priority order:
+
+```java
+@Provider
+@Produces(MediaType.APPLICATION_JSON)
+public class ExceptionsMapperGlobal implements ExceptionMapper<Exception> {
+
+    private static final Logger LOG = Logger.getLogger(ExceptionsMapperGlobal.class);
+
+    @Override
+    public Response toResponse(Exception e) {
+        if (e instanceof NaoEncontradoException)       return status(404, e.getMessage());
+        if (e instanceof ValidacaoException)           return status(422, e.getMessage());
+        if (e instanceof RegraNegocioException)        return status(409, e.getMessage());
+        if (e instanceof RequisicaoInvalidaException)  return status(400, e.getMessage());
+        if (e instanceof ConstraintViolationException) return status(400, e.getMessage());
+
+        // Pass-through for known 4xx WebApplicationExceptions (e.g. JWT 401/403)
+        if (e instanceof WebApplicationException wae && wae.getResponse().getStatus() < 500) {
+            int status = wae.getResponse().getStatus();
+            String msg = status == 404 ? "Recurso não encontrado." : e.getMessage();
+            return status(status, msg);
+        }
+
+        // Fallback — log internally, return generic 500
+        LOG.errorf(e, "[Erro interno de servidor]: %s, %s", e.getClass().getSimpleName(), e.getMessage());
+        return status(500, "Erro interno do servidor.");
+    }
+}
+```
+
+All branches produce the same `ErroResponse` record:
+
+```java
+public record ErroResponse(int statusCode, String mensagem, LocalDateTime timestamp) {}
+```
+
+---
+
+## Exception Types → HTTP Status Codes
+
+| Exception Class | HTTP Status | Semantic Meaning |
+|---|---|---|
+| `RequisicaoInvalidaException` | `400 Bad Request` | The request payload is structurally invalid or contains an explicitly rejected value. |
+| `ConstraintViolationException` | `400 Bad Request` | A Jakarta Bean Validation constraint (e.g. `@NotBlank`, `@Pattern`, `@Email`) was violated on a request DTO. |
+| `NaoEncontradoException` | `404 Not Found` | The requested resource (collaborator, address, specialty, etc.) does not exist in the database. |
+| `RegraNegocioException` | `409 Conflict` | The request is syntactically valid but violates a domain business rule (e.g. duplicate CPF, invalid state transition). |
+| `ValidacaoException` | `422 Unprocessable Entity` | The request is well-formed and passes bean validation, but semantic validation failed (e.g. CPF digit check, date range). |
+| `Exception` (fallback) | `500 Internal Server Error` | An unexpected runtime fault occurred. The exception is logged server-side but a generic message is returned to the client. |
+
+---
+
+## Error Response Format
+
+Every non-2xx response body has the following structure:
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Colaborador não encontrado.",
+  "timestamp": "2025-06-01T14:32:05.123456789"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `statusCode` | `integer` | HTTP status code, mirrored in the response body for convenience. |
+| `mensagem` | `string` | Human-readable error detail. Generic `"Erro interno do servidor."` for 500s. |
+| `timestamp` | `string` | ISO-8601 `LocalDateTime` of when the error was generated on the server. |
+
+---
+
+## Example Error Responses
+
+### 400 Bad Request — Bean Validation Failure
+
+Triggered when a `@Pattern`, `@NotBlank`, `@Email`, or similar Jakarta constraint is violated on a request DTO field.
+
+```json
+{
+  "statusCode": 400,
+  "mensagem": "criarColaborador.request.cpf: CPF deve conter 11 números.",
+  "timestamp": "2025-06-01T09:15:30.456789"
+}
+```
+
+### 400 Bad Request — Invalid Request
+
+Triggered by an explicit `RequisicaoInvalidaException` thrown in a service method when the payload is semantically malformed.
+
+```json
+{
+  "statusCode": 400,
+  "mensagem": "O campo 'tipoEndereco' não pode ser nulo.",
+  "timestamp": "2025-06-01T09:18:00.123456"
+}
+```
+
+### 404 Not Found
+
+Thrown by `NaoEncontradoException` when a look-up by CPF, ID, or other identifier finds no matching record.
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Especialidade com id 99 não encontrada!",
+  "timestamp": "2025-06-01T10:05:42.789012"
+}
+```
+
+### 409 Conflict — Business Rule Violation
+
+Thrown by `RegraNegocioException` when the operation would violate a domain invariant, such as registering a duplicate CPF or transitioning a request to an invalid state.
+
+```json
+{
+  "statusCode": 409,
+  "mensagem": "Já existe um colaborador cadastrado com este CPF.",
+  "timestamp": "2025-06-01T11:22:10.654321"
+}
+```
+
+### 422 Unprocessable Entity — Semantic Validation Failure
+
+Thrown by `ValidacaoException` when the request passes structural validation but fails application-level checks such as CPF digit verification.
+
+```json
+{
+  "statusCode": 422,
+  "mensagem": "CPF inválido.",
+  "timestamp": "2025-06-01T11:45:55.321654"
+}
+```
+
+### 500 Internal Server Error
+
+Returned for any uncaught `Exception` that does not match a known application exception type.
+
+```json
+{
+  "statusCode": 500,
+  "mensagem": "Erro interno do servidor.",
+  "timestamp": "2025-06-01T13:00:00.000001"
+}
+```
+
+<Warning>
+  HTTP `500` errors are logged internally using JBoss Logger at `ERROR` level, including the full exception class name and message. However, the API always returns the fixed string `"Erro interno do servidor."` to the client — no stack trace, class name, or internal detail is ever exposed in the response body. This prevents information leakage that could aid an attacker in probing the system.
+</Warning>
+
+---
+
+## 401 and 403 Responses
+
+<Note>
+  HTTP `401 Unauthorized` and `403 Forbidden` responses are **not** produced by `ExceptionsMapperGlobal`. They are generated directly by Quarkus's SmallRye JWT and RBAC enforcement layer when a request arrives without a valid Bearer token (`401`) or when a valid token lacks the required role (`403`). These responses may not carry the `ErroResponse` JSON body — clients should handle them independently of the standard error format.
+</Note>
+
+The security annotations in use across the resource classes are:
+
+| Annotation | Effect |
+|---|---|
+| `@RolesAllowed("ADMIN")` | Only tokens with the `ADMIN` role are permitted; others receive `403`. |
+| `@RolesAllowed({"ADMIN", "COLABORADOR"})` | Both roles are permitted; missing token receives `401`. |
+| `@PermitAll` | No token required — public endpoint (Especialidades, Programas Sociais). |

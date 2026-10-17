@@ -1,0 +1,160 @@
+---
+title: "Authentication API: JWT Token Endpoints"
+sidebarTitle: "Authentication"
+description: "POST /auth/tokenAcesso issues RSA-256 JWT access and refresh tokens. POST /auth/refreshToken renews the session without re-submitting credentials."
+---
+
+The Raiz do Bem API uses **JWT (JSON Web Token)** authentication signed with RSA-256. All protected endpoints require a valid access token passed in the `Authorization: Bearer <token>` header. Both authentication endpoints are annotated `@PermitAll` — they require **no existing credentials** to call. The access token is short-lived; use the refresh token endpoint to renew a session without asking the user to log in again.
+
+---
+
+## POST /auth/tokenAcesso
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/auth/tokenAcesso</code>
+  <span style={{ background: "#6366f1", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>@PermitAll</span>
+</div>
+
+Authenticates a collaborator (collaborador) and returns a short-lived **access token** and a long-lived **refresh token**. No `Authorization` header is required to call this endpoint.
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  The collaborator's registered e-mail address.
+</ParamField>
+
+<ParamField body="senha" type="string" required>
+  The collaborator's password (plaintext over HTTPS; stored as a hash server-side).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/auth/tokenAcesso \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "colaborador@raizdobem.com.br",
+    "senha": "MinhaS3nhaSegura!"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjb2xhYm9yYWRvckByYWl6ZG9iZW0uY29tLmJyIiwicm9sZXMiOlsiQ09MQUJPUkFET1IiXSwiaWF0IjoxNzE2MDAwMDAwLCJleHAiOjE3MTYwMDM2MDB9.SIGNATURE",
+  "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4gZXhhbXBsZQ",
+  "tokenType": "Bearer",
+  "expiresIn": 3600
+}
+```
+
+### Response fields
+
+<ResponseField name="accessToken" type="string">
+  RSA-256 signed JWT. Pass this value in every subsequent request as `Authorization: Bearer <accessToken>`.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  Opaque token used exclusively with `POST /auth/refreshToken` to obtain a new access token without re-entering credentials.
+</ResponseField>
+
+<ResponseField name="tokenType" type="string">
+  Always `"Bearer"`.
+</ResponseField>
+
+<ResponseField name="expiresIn" type="integer">
+  Seconds until the access token expires.
+</ResponseField>
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Credentials accepted; tokens returned. |
+| `400 Bad Request` | Missing or invalid fields in the request body. |
+
+---
+
+## POST /auth/refreshToken
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/auth/refreshToken</code>
+  <span style={{ background: "#6366f1", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>@PermitAll</span>
+</div>
+
+Exchanges a valid refresh token for a new access token (and optionally a new refresh token). This endpoint is also `@PermitAll` — no `Authorization` header required.
+
+### Request body
+
+<ParamField body="refreshToken" type="string" required>
+  The refresh token previously returned by `POST /auth/tokenAcesso` or an earlier call to this endpoint. Must be non-blank (`@NotBlank`).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/auth/refreshToken \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4gZXhhbXBsZQ"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjb2xhYm9yYWRvckByYWl6ZG9iZW0uY29tLmJyIiwicm9sZXMiOlsiQ09MQUJPUkFET1IiXSwiaWF0IjoxNzE2MDAzNjAwLCJleHAiOjE3MTYwMDcyMDB9.SIGNATURE",
+  "refreshToken": "bmV3UmVmcmVzaFRva2VuRXhhbXBsZQ",
+  "tokenType": "Bearer",
+  "expiresIn": 3600
+}
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Refresh token accepted; new access token returned. |
+| `400 Bad Request` | The `refreshToken` field is blank or the token is expired/invalid. |
+
+---
+
+## Using tokens in subsequent requests
+
+After obtaining an access token, include it in the `Authorization` header for every protected endpoint:
+
+```bash
+curl -X GET https://api.raizdobem.com.br/beneficiario \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+<Note>
+  The JWT payload carries the collaborator's `roles` claim (`ADMIN` or `COLABORADOR`). Quarkus evaluates this claim against `@RolesAllowed` annotations on each resource method. Sending a token for a role that lacks permission returns `403 Forbidden`.
+</Note>
+
+### Token format
+
+The access token is a standard three-part JWT:
+
+```
+<base64url-header>.<base64url-payload>.<base64url-signature>
+```
+
+**Header** (decoded):
+```json
+{ "alg": "RS256", "typ": "JWT" }
+```
+
+**Payload** (decoded, illustrative):
+```json
+{
+  "sub": "colaborador@raizdobem.com.br",
+  "roles": ["COLABORADOR"],
+  "iat": 1716000000,
+  "exp": 1716003600
+}
+```

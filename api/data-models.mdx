@@ -1,0 +1,178 @@
+---
+title: "Data Models: Request and Response Schemas"
+sidebarTitle: "Data Models"
+description: "Reference for PageResponse pagination envelope, ErroResponse error format, and key enums — StatusPedido, TipoEndereco, Sexo — used across the API."
+---
+
+Every endpoint in the Raiz do Bem API produces and consumes a consistent set of shared data structures. Understanding these models is essential before integrating with any resource: paginated list endpoints always wrap their results in `PageResponse<T>`, errors are uniformly represented by `ErroResponse`, and domain-specific enumerations like `StatusPedido`, `TipoEndereco`, and `Sexo` control the accepted values for key fields across multiple resources. CPF fields additionally pass through a Brazilian tax-ID checksum validator before any record is persisted. This page documents all of these shared contracts in one place.
+
+---
+
+## PageResponse\<T\>
+
+List endpoints that support pagination (collaborators, beneficiaries, help-requests, and appointments) wrap their results in a generic `PageResponse<T>` envelope. Pagination is controlled with the `pagina` (zero-based page index) and `size` (records per page, default `20`) query parameters.
+
+```http
+GET /colaborador?pagina=0&size=20
+```
+
+<ResponseField name="conteudo" type="array">
+  The list of items on the current page. The item type (`T`) varies by endpoint — for example `ColaboradorResponse` on `/colaborador`.
+</ResponseField>
+
+<ResponseField name="pagina" type="integer">
+  The zero-based index of the current page. Matches the `pagina` query parameter sent in the request.
+</ResponseField>
+
+<ResponseField name="tamanho" type="integer">
+  The number of items actually returned on this page. May be less than `size` on the last page.
+</ResponseField>
+
+<ResponseField name="totalElementos" type="long">
+  The total count of records across all pages. Use this to calculate the full result set size.
+</ResponseField>
+
+<ResponseField name="totalPaginas" type="integer">
+  The total number of pages available given the requested `size`. Computed as `⌈totalElementos / size⌉`.
+</ResponseField>
+
+**Example — listing collaborators, page 0, size 20**
+
+```json
+{
+  "conteudo": [
+    {
+      "id": 1,
+      "cpf": "12345678901",
+      "nomeCompleto": "Maria Silva",
+      "dataNascimento": "1990-05-20",
+      "dataContratacao": "2024-01-15",
+      "email": "maria.silva@raizdobem.org",
+      "role": "COLABORADOR"
+    },
+    {
+      "id": 2,
+      "cpf": "98765432100",
+      "nomeCompleto": "João Costa",
+      "dataNascimento": "1985-11-03",
+      "dataContratacao": "2023-06-01",
+      "email": "joao.costa@raizdobem.org",
+      "role": "ADMIN"
+    }
+  ],
+  "pagina": 0,
+  "tamanho": 2,
+  "totalElementos": 2,
+  "totalPaginas": 1
+}
+```
+
+<Note>
+  Always use `totalPaginas` to detect the last page. When `pagina >= totalPaginas`, the API returns an empty `conteudo` array rather than an error.
+</Note>
+
+---
+
+## ErroResponse
+
+All error conditions — validation failures, not-found lookups, business rule violations, and internal faults — are returned as a uniform `ErroResponse` JSON object. There is no envelope wrapper; the object is returned directly as the HTTP response body.
+
+<ResponseField name="statusCode" type="integer">
+  The HTTP status code of the error (e.g. `400`, `404`, `409`, `422`, `500`). Mirrors the HTTP response status line for convenience.
+</ResponseField>
+
+<ResponseField name="mensagem" type="string">
+  A human-readable description of what went wrong. Sourced from the exception message for application-level exceptions. For uncaught server errors, always returns the fixed string `"Erro interno do servidor."` to prevent information leakage.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string (ISO-8601 datetime)">
+  The server-side instant at which the error was generated, formatted as `LocalDateTime` (e.g. `"2025-06-01T14:32:05.123456789"`). Useful for correlating client logs with server logs.
+</ResponseField>
+
+**Example — 404 Not Found**
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Colaborador não encontrado.",
+  "timestamp": "2025-06-01T14:32:05.123456789"
+}
+```
+
+**Example — 400 Bad Request (constraint violation)**
+
+```json
+{
+  "statusCode": 400,
+  "mensagem": "criarColaborador.request.cpf: CPF deve conter 11 números.",
+  "timestamp": "2025-06-01T14:33:01.987654321"
+}
+```
+
+---
+
+## Enumerations
+
+### StatusPedido
+
+Controls the lifecycle state of a help-request (`PedidoAjuda`). Set via `PUT /pedido-ajuda/{id}` by a collaborator after review.
+
+| Value | Meaning |
+|---|---|
+| `PENDENTE` | The request has been submitted and is awaiting review. Initial state. |
+| `APROVADO` | The request has been approved; a beneficiary record can now be created. |
+| `REJEITADO` | The request was reviewed and denied. |
+
+```json
+{ "statusPedido": "APROVADO" }
+```
+
+---
+
+### TipoEndereco
+
+Classifies the purpose of an address. Required when creating or updating a record via `POST /endereco` or `PUT /endereco/{id}`.
+
+| Value | Meaning |
+|---|---|
+| `RESIDENCIAL` | The home address of a beneficiary or petitioner. |
+| `PROFISSIONAL` | The clinic or office address of a participating dentist. |
+
+```json
+{ "tipoEndereco": "PROFISSIONAL" }
+```
+
+---
+
+### Sexo
+
+Biological sex field used in beneficiary and dentist registration forms.
+
+| Value | Meaning |
+|---|---|
+| `M` | Male |
+| `F` | Female |
+| `O` | Other / Not specified |
+
+```json
+{ "sexo": "F" }
+```
+
+---
+
+## CPF Validation
+
+Any field named `cpf` that carries the `@Pattern(regexp = "^\\d{11}$")` annotation is also subject to deeper **Luhn-style digit verification** performed by `CpfValidatorUtil.cpfValido()` in the service layer before persistence. The algorithm:
+
+1. **Strip non-digits** — any formatting characters (dots, hyphens) are removed.
+2. **Length check** — the CPF must be exactly 11 digits.
+3. **Repeated-digit check** — sequences like `"11111111111"` are automatically invalid.
+4. **First check digit** — a weighted sum of digits 1–9 (weights 10→2) is computed. The remainder `(sum × 10) % 11` must equal digit 10 (index 9), with the special case that a remainder of 10 resolves to 0.
+5. **Second check digit** — the same process is repeated over digits 1–10 (weights 11→2) and the result must equal digit 11 (index 10).
+
+A CPF that fails any of these steps causes the service to reject the request before it reaches the database. Invalid CPFs produce a `400 Bad Request` via `ConstraintViolationException` (pattern check) or a `409 Conflict` via `RegraNegocioException` (digit verification failure), depending on where the validation triggers.
+
+```java
+// CpfValidatorUtil — simplified logic
+boolean cpfValido = CpfValidatorUtil.cpfValido("12345678909"); // true or false
+```

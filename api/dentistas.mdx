@@ -1,0 +1,374 @@
+---
+title: "Volunteer Dentists API: Manage Dental Professionals"
+sidebarTitle: "Dentistas"
+description: "CRUD endpoints for volunteer dentists — list paginated, register with specialties and address, filter by city or availability, and export as CSV."
+---
+
+The Dentistas API manages the roster of volunteer dental professionals who provide care through the Raiz do Bem NGO. Dentists can be registered with their CRO number, specialty, category, availability status, and address. The registration endpoint (`POST /dentista`) is **`@PermitAll`** so that potential volunteers can self-register through the public-facing portal without needing an account. All read and update operations require a valid JWT with the `ADMIN` or `COLABORADOR` role.
+
+---
+
+## POST /dentista
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#22c55e", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>POST</span>
+  <code>/dentista</code>
+  <span style={{ background: "#6366f1", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>@PermitAll</span>
+</div>
+
+Registers a new volunteer dentist. This endpoint is publicly accessible — no authentication token is required — to allow dentists to self-register via the NGO's volunteer portal. All required fields are validated server-side; an invalid CRO pattern or missing required field returns `400 Bad Request`.
+
+### Request body
+
+<ParamField body="croDentista" type="string" required>
+  CRO registration number. Must match `^[A-Z0-9-/ ]{3,10}$` (3–10 alphanumeric characters, case-insensitive).
+</ParamField>
+
+<ParamField body="cpf" type="string" required>
+  11-digit CPF of the dentist (digits only). Must match `^\d{11}$`.
+</ParamField>
+
+<ParamField body="nomeCompleto" type="string" required>
+  Full legal name (non-blank).
+</ParamField>
+
+<ParamField body="sexo" type="string" required>
+  Gender identifier (non-blank, e.g. `"M"`, `"F"`, `"O"`).
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid e-mail address (`@Email` validated, non-blank).
+</ParamField>
+
+<ParamField body="telefone" type="string" required>
+  Contact phone number (non-blank).
+</ParamField>
+
+<ParamField body="categoria" type="string" required>
+  Dentist category or type (e.g. `"VOLUNTARIO"`, `"PARCEIRO"`). Non-blank.
+</ParamField>
+
+<ParamField body="idEspecialidade" type="integer" required>
+  ID of the dentist's primary specialty. Use `GET /especialidades` to list available IDs. `@NotNull`.
+</ParamField>
+
+<ParamField body="disponivel" type="string" required>
+  Availability flag (non-blank; e.g. `"S"` for yes, `"N"` for no).
+</ParamField>
+
+<ParamField body="endereco" type="object" required>
+  Address object. `@NotNull`, `@Valid`. Contains:
+  - `cep` *(string)* — 8-digit postal code (digits only).
+  - `numero` *(string)* — Street number or apartment identifier.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://api.raizdobem.com.br/dentista \
+  -H "Content-Type: application/json" \
+  -d '{
+    "croDentista": "SP-12345",
+    "cpf": "98765432100",
+    "nomeCompleto": "Dr. Carlos Ferreira",
+    "sexo": "M",
+    "email": "carlos.ferreira@clinica.com.br",
+    "telefone": "11977776666",
+    "categoria": "VOLUNTARIO",
+    "idEspecialidade": 3,
+    "disponivel": "S",
+    "endereco": {
+      "cep": "05407002",
+      "numero": "500"
+    }
+  }'
+```
+
+### Example response
+
+```json
+{
+  "id": 12,
+  "croDentista": "SP-12345",
+  "cpf": "98765432100",
+  "nomeCompleto": "Dr. Carlos Ferreira",
+  "sexo": "M",
+  "email": "carlos.ferreira@clinica.com.br",
+  "telefone": "11977776666",
+  "categoria": "VOLUNTARIO",
+  "especialidades": ["Ortodontia"],
+  "programasSociais": ["Dentista do Bem"],
+  "disponivel": "S",
+  "logradouro": "Av. Rebouças",
+  "numero": "500",
+  "cidade": "São Paulo",
+  "estado": "SP",
+  "cep": "05407002"
+}
+```
+
+### Response fields
+
+<ResponseField name="id" type="integer">
+  Internal database ID assigned on creation.
+</ResponseField>
+
+<ResponseField name="croDentista" type="string">
+  CRO registration number as submitted.
+</ResponseField>
+
+<ResponseField name="cpf" type="string">
+  11-digit CPF.
+</ResponseField>
+
+<ResponseField name="nomeCompleto" type="string">
+  Full name.
+</ResponseField>
+
+<ResponseField name="sexo" type="string">
+  Gender identifier.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  E-mail address.
+</ResponseField>
+
+<ResponseField name="telefone" type="string">
+  Phone number.
+</ResponseField>
+
+<ResponseField name="categoria" type="string">
+  Dentist category.
+</ResponseField>
+
+<ResponseField name="especialidades" type="array of string">
+  List of specialty names associated with this dentist.
+</ResponseField>
+
+<ResponseField name="programasSociais" type="array of string">
+  Social programs this dentist participates in.
+</ResponseField>
+
+<ResponseField name="disponivel" type="string">
+  Current availability flag.
+</ResponseField>
+
+<ResponseField name="logradouro" type="string">
+  Street name resolved from the CEP via ViaCEP.
+</ResponseField>
+
+<ResponseField name="numero" type="string">
+  Street number.
+</ResponseField>
+
+<ResponseField name="cidade" type="string">
+  City.
+</ResponseField>
+
+<ResponseField name="estado" type="string">
+  State abbreviation (e.g. `"SP"`).
+</ResponseField>
+
+<ResponseField name="cep" type="string">
+  Postal code.
+</ResponseField>
+
+---
+
+## GET /dentista
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/dentista</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns a paginated list of all registered dentists.
+
+### Query parameters
+
+<ParamField query="pagina" type="integer" default="0">
+  Zero-based page number.
+</ParamField>
+
+<ParamField query="size" type="integer" default="20">
+  Number of records per page.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/dentista?pagina=0&size=20" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /dentista/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/dentista/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Retrieves a single dentist record by CPF.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the dentist (digits only).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/dentista/98765432100 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /dentista/cidade/{cidade}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/dentista/cidade/{"{cidade}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Lists all dentists whose registered address city matches the given value.
+
+### Path parameters
+
+<ParamField path="cidade" type="string" required>
+  City name to filter by (e.g. `"Campinas"`, `"São Paulo"`).
+</ParamField>
+
+### Example request
+
+```bash
+curl -X GET "https://api.raizdobem.com.br/dentista/cidade/Campinas" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /dentista/disponiveis
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/dentista/disponiveis</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Returns only dentists whose `disponivel` flag is set to `"S"` (available). Useful when assigning a dentist to a new aid request or appointment without needing to filter manually.
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/dentista/disponiveis \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /dentista/exportarCsv
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#3b82f6", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>GET</span>
+  <code>/dentista/exportarCsv</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Exports the full dentist roster as a UTF-8 encoded CSV file. Unlike the beneficiary CSV export, this endpoint is available to both `ADMIN` and `COLABORADOR` roles.
+
+### Example request
+
+```bash
+curl -X GET https://api.raizdobem.com.br/dentista/exportarCsv \
+  -H "Authorization: Bearer <token>" \
+  -o Dentistas_export.csv
+```
+
+### Response headers
+
+```
+Content-Type: text/csv; charset=UTF-8
+Content-Disposition: attachment; filename="Dentistas_20240115_103000.csv"
+```
+
+---
+
+## PUT /dentista/{cpf}
+
+<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px" }}>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 10px", fontWeight: 700, fontSize: "13px" }}>PUT</span>
+  <code>/dentista/{"{cpf}"}</code>
+  <span style={{ background: "#f59e0b", color: "#fff", borderRadius: "4px", padding: "2px 8px", fontSize: "12px" }}>ADMIN · COLABORADOR</span>
+</div>
+
+Updates mutable fields on a dentist record. CPF and CRO number are immutable after registration.
+
+### Path parameters
+
+<ParamField path="cpf" type="string" required>
+  11-digit CPF of the dentist to update.
+</ParamField>
+
+### Request body
+
+<ParamField body="telefone" type="string">
+  Updated phone number.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Updated e-mail address.
+</ParamField>
+
+<ParamField body="categoriaDentista" type="string">
+  Updated category (e.g. `"VOLUNTARIO"`, `"PARCEIRO"`).
+</ParamField>
+
+<ParamField body="idEspecialidade" type="integer">
+  ID of a new primary specialty to associate with the dentist.
+</ParamField>
+
+<ParamField body="disponivel" type="string">
+  Updated availability flag (`"S"` or `"N"`).
+</ParamField>
+
+<ParamField body="endereco" type="object">
+  Partial address update. Contains:
+  - `cep` *(string)* — 8-digit postal code.
+  - `numero` *(string)* — Street number.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PUT https://api.raizdobem.com.br/dentista/98765432100 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telefone": "11966665555",
+    "email": "carlos.novo@clinica.com.br",
+    "categoriaDentista": "PARCEIRO",
+    "idEspecialidade": 5,
+    "disponivel": "N",
+    "endereco": {
+      "cep": "01310100",
+      "numero": "200"
+    }
+  }'
+```
+
+### HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Update successful; updated `DentistaResponse` returned. |
+| `400 Bad Request` | Validation failure on any field. |
+| `401 Unauthorized` | Missing or invalid JWT. |
+| `403 Forbidden` | Role lacks permission. |
+| `404 Not Found` | Dentist with that CPF does not exist. |

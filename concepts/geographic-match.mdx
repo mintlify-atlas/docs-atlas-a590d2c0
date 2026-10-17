@@ -1,0 +1,232 @@
+---
+title: "Geographic Appointment Matching with Google Maps"
+sidebarTitle: "Geographic Match"
+description: "How Raiz do Bem API uses Google Maps Routes API computeRouteMatrix to automatically pair each beneficiary with the nearest available volunteer dentist."
+---
+
+When an appointment (`Atendimento`) is created without a manually specified dentist, the Raiz do Bem API automatically selects the most geographically proximate volunteer from the pool of available professionals. This geographic matching is powered by the **Google Maps Routes API `computeRouteMatrix` endpoint**, which returns real road distances in meters for a one-to-many origin/destination matrix. The result is a fully automated pairing that minimizes travel burden for the beneficiary — a critical concern for vulnerable populations with limited mobility.
+
+## How the Match Algorithm Works
+
+The matching logic lives in two collaborating `@ApplicationScoped` services: `AtendimentoMatchService` orchestrates the business flow, while `GoogleMapsService` handles the Google Maps API call and distance ranking.
+
+### AtendimentoMatchService
+
+`AtendimentoMatchService` is the entry point called by `AtendimentoService` when no dentist CPF is provided at appointment creation time:
+
+```java
+@ApplicationScoped
+public class AtendimentoMatchService {
+
+    @Inject
+    DentistaService dentistaService;
+
+    @Inject
+    GoogleMapsService googleMapsService;
+
+    public DentistaResponse melhorMatchDentista(BeneficiarioResponse beneficiarioResponse) {
+        List<DentistaResponse> dentistas = dentistaService.listarDisponiveis();
+
+        if (dentistas.isEmpty())
+            throw new NaoEncontradoException(
+                "Nenhum dentista disponível para vincular ao atendimento.");
+
+        String enderecoBeneficiario = montarEndereco(beneficiarioResponse.endereco());
+        return googleMapsService.calcularDistanciaProximidade(enderecoBeneficiario, dentistas);
+    }
+
+    public static String montarEndereco(EnderecoResponse dto) {
+        if (dto == null)
+            throw new ValidacaoException(
+                "Endereço do beneficiário é obrigatório para calcular a proximidade com os dentistas.");
+
+        if (dto.numero() == null)
+            return dto.logradouro() + ", " + dto.cidade() + ", " + dto.estado();
+        return dto.logradouro() + ", " + dto.numero() + ", " + dto.cidade() + ", " + dto.estado();
+    }
+}
+```
+
+The `montarEndereco` helper assembles a human-readable address string from the beneficiary's `RESIDENCIAL` `Endereco`. The number component is included only when present, since some Brazilian addresses omit a street number (`S/N`).
+
+### GoogleMapsService
+
+`GoogleMapsService` builds the request payload for `computeRouteMatrix`, calls `GoogleMapsClient`, and selects the dentist with the lowest `distanceMeters` among all routes whose condition is `ROUTE_EXISTS`:
+
+```java
+@ApplicationScoped
+public class GoogleMapsService {
+
+    @ConfigProperty(name = "google-api-key")
+    String chaveApi;
+
+    @Inject
+    @RestClient
+    GoogleMapsClient googleMapsClient;
+
+    public DentistaResponse calcularDistanciaProximidade(
+            String enderecoBeneficiario, List<DentistaResponse> dentistas) {
+
+        GoogleMapsEnderecoDTO origem = new GoogleMapsEnderecoDTO(
+                new PontoParadaDTO(enderecoBeneficiario));
+
+        List<GoogleMapsEnderecoDTO> destinos = dentistas.stream()
+                .map(d -> new GoogleMapsEnderecoDTO(
+                        new PontoParadaDTO(
+                                d.logradouro() + ", " + d.numero() + ", " +
+                                d.cidade() + ", " + d.estado())))
+                .toList();
+
+        if (destinos.isEmpty())
+            return dentistas.getFirst();
+
+        GoogleMapsRequestDTO request = new GoogleMapsRequestDTO();
+        List<GoogleMapsEnderecoDTO> enderecoOrigem = new ArrayList<>();
+        enderecoOrigem.add(origem);
+        request.setOrigins(enderecoOrigem);
+        request.setDestinations(destinos);
+
+        String recursosApi = "originIndex,destinationIndex,distanceMeters,condition";
+
+        try {
+            List<GoogleMapsResponseDTO> rotas = googleMapsClient.buscarRotas(
+                    chaveApi, recursosApi, request);
+
+            GoogleMapsResponseDTO menorRota = rotas.stream()
+                    .filter(r -> "ROUTE_EXISTS".equals(r.statusRetorno()))
+                    .min(Comparator.comparingInt(GoogleMapsResponseDTO::metrosDistancia))
+                    .orElse(rotas.getFirst());
+
+            return dentistas.get(menorRota.elementoDestino());
+        } catch (Exception e) {
+            return dentistas.getFirst();
+        }
+    }
+}
+```
+
+<Note>
+  The `X-Goog-FieldMask` header is set to `"originIndex,destinationIndex,distanceMeters,condition"`, limiting the API response to only the fields the algorithm needs. This reduces payload size and avoids billing for unrequested data.
+</Note>
+
+## The GoogleMapsClient REST Interface
+
+`GoogleMapsClient` is a MicroProfile REST Client interface that maps directly to the Google Maps Routes API endpoint. Two custom headers are required per request:
+
+```java
+@RegisterRestClient(configKey = "google-maps-api")
+@Path("/")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+public interface GoogleMapsClient {
+
+    @POST
+    @Path("/distanceMatrix/v2:computeRouteMatrix")
+    List<GoogleMapsResponseDTO> buscarRotas(
+        @HeaderParam("X-Goog-Api-Key") String apiKey,
+        @HeaderParam("X-Goog-FieldMask") String camposNecessarios,
+        GoogleMapsRequestDTO request);
+}
+```
+
+| Header | Value | Purpose |
+|:---|:---|:---|
+| `X-Goog-Api-Key` | Value of `GOOGLE_API_KEY` env var | Authenticates the request to the Google Cloud project. |
+| `X-Goog-FieldMask` | `"originIndex,destinationIndex,distanceMeters,condition"` | Field projection — only returns route fields consumed by the ranking algorithm. |
+
+## ViaCepClient for Address Enrichment
+
+Before any address is persisted — and therefore before it can be used as a match origin or destination — it is enriched via `ViaCepClient`, which calls the public ViaCEP service:
+
+```java
+@RegisterRestClient(configKey = "via-cep-api")
+@Path("/")
+public interface ViaCepClient {
+
+    @GET
+    @Path("/{cep}/json/")
+    ViaCepDTO buscarEndereco(@PathParam("cep") String cep);
+}
+```
+
+The `ViaCepDTO` response fills in `logradouro`, `bairro`, `cidade`, and `estado` from the provided CEP, so the full address string assembled by `montarEndereco` and `GoogleMapsService` is always complete and geocodable by Google Maps.
+
+## Environment Variable Requirement
+
+<Warning>
+  The `GOOGLE_API_KEY` environment variable (mapped to the `google-api-key` config property) must be set before starting the application. The corresponding Google Cloud project must have the **Routes API** enabled. Without a valid key, `GoogleMapsClient` will throw an exception and the fallback will return the first dentist in the available list rather than the nearest one.
+</Warning>
+
+```bash
+# Linux / macOS
+export GOOGLE_API_KEY="<your_google_api_key>"
+
+# Windows (PowerShell)
+$env:GOOGLE_API_KEY="<your_google_api_key>"
+```
+
+## Step-by-Step Flow
+
+<Steps>
+  <Step title="Appointment creation request arrives">
+    `POST /atendimento/` is called with a `prontuario` and a beneficiary CPF. If the request body includes a dentist CPF, geographic matching is **skipped** and that dentist is assigned directly. When no dentist is specified, the match flow begins.
+  </Step>
+  <Step title="Beneficiary record and address are resolved">
+    `AtendimentoService` fetches the `BeneficiarioResponse` for the given CPF. The beneficiary must have an `Endereco` of type `RESIDENCIAL` — if the address is missing, `AtendimentoMatchService.montarEndereco` throws a `ValidacaoException` (HTTP 422) immediately.
+  </Step>
+  <Step title="Available dentists are queried">
+    `AtendimentoMatchService` calls `DentistaService.listarDisponiveis()`, which returns all `Dentista` records where `disponivel` is set to the active flag. If the list is empty, a `NaoEncontradoException` (HTTP 404) is thrown with the message `"Nenhum dentista disponível para vincular ao atendimento."`.
+  </Step>
+  <Step title="Address strings are assembled">
+    `montarEndereco` constructs the origin string from the beneficiary's `RESIDENCIAL` address. `GoogleMapsService` constructs one destination string per available dentist using their `PROFISSIONAL` address fields (`logradouro`, `numero`, `cidade`, `estado`).
+  </Step>
+  <Step title="computeRouteMatrix is called">
+    `GoogleMapsClient.buscarRotas` POSTs to `/distanceMatrix/v2:computeRouteMatrix` with the single origin and all dentist destinations as the request body, plus the `X-Goog-Api-Key` and `X-Goog-FieldMask` headers.
+  </Step>
+  <Step title="Nearest dentist is selected">
+    The response list of `GoogleMapsResponseDTO` objects is filtered to only those with `condition = "ROUTE_EXISTS"`, then minimized by `distanceMeters`. The `destinationIndex` of the winning route maps back to the corresponding dentist in the original list.
+  </Step>
+  <Step title="Appointment is persisted">
+    The selected `Dentista` is set on the new `Atendimento` entity along with the `Beneficiario`, the supervising `Colaborador`, and the initial `dataInicial = LocalDate.now()`. The record is persisted and returned.
+  </Step>
+</Steps>
+
+## Edge Cases
+
+<Tabs>
+  <Tab title="No Available Dentists">
+    If `DentistaService.listarDisponiveis()` returns an empty list, `AtendimentoMatchService` throws:
+
+    ```java
+    throw new NaoEncontradoException(
+        "Nenhum dentista disponível para vincular ao atendimento.");
+    ```
+
+    This maps to **HTTP 404** via `ExceptionsMapperGlobal`. The appointment is not created.
+  </Tab>
+  <Tab title="Missing Beneficiary Address">
+    If the beneficiary has no linked `Endereco`, `montarEndereco` throws:
+
+    ```java
+    throw new ValidacaoException(
+        "Endereço do beneficiário é obrigatório para calcular a proximidade com os dentistas.");
+    ```
+
+    This maps to **HTTP 422** via `ExceptionsMapperGlobal`. The appointment is not created.
+  </Tab>
+  <Tab title="Google Maps API Failure">
+    Any exception thrown during the `googleMapsClient.buscarRotas(...)` call is caught by the `try/catch` block in `GoogleMapsService`. When this happens, the service **falls back** to returning `dentistas.getFirst()` — the first dentist in the available list — so the appointment is still created even if the external API is unavailable.
+
+    ```java
+    try {
+        List<GoogleMapsResponseDTO> rotas = googleMapsClient.buscarRotas(...);
+        // ... ranking logic
+    } catch (Exception e) {
+        return dentistas.getFirst(); // graceful degradation
+    }
+    ```
+  </Tab>
+  <Tab title="No Valid Routes in Response">
+    If the Google Maps API returns results but none have `condition = "ROUTE_EXISTS"` (e.g., all routes are `NOT_FOUND` due to unresolvable addresses), the `.orElse(rotas.getFirst())` fallback selects the first element of the raw response, and `destinationIndex` is used to pick the corresponding dentist.
+  </Tab>
+</Tabs>

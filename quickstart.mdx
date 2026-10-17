@@ -1,47 +1,184 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Raiz do Bem API"
+sidebarTitle: "Quickstart"
+description: "Set up the Raiz do Bem API locally with Java 21 and Maven, configure environment variables, and make your first authenticated request."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+The Raiz do Bem API ships with a **Maven Wrapper** (`mvnw` / `mvnw.cmd`), so you do not need a globally installed Maven to get started — only a **Java 21 JDK** is required on your machine. The steps below take you from a fresh clone to a running local server and a successful authenticated API call, including obtaining a JWT token from the `/auth/tokenAcesso` endpoint.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+<Step title="Install Prerequisites">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+Ensure the following are available on your system before proceeding:
 
+- **Java 21 JDK** — the API targets Java 21 LTS. Verify your installation:
+
+```bash
+java -version
+# Expected output: openjdk version "21.x.x" ...
+```
+
+- **Maven** *(optional)* — the Maven Wrapper bundled in the repository (`./mvnw`) handles all builds automatically, so a global Maven installation is not required.
+
+- **Oracle Database** — a running Oracle instance accessible via JDBC is needed for the persistence layer. You can use Oracle XE locally or point to a cloud-hosted instance.
+
+- **Google Cloud API Key** — the geographic match feature calls the Google Maps Routes API. Create a key in [Google Cloud Console](https://console.cloud.google.com/) with the **Routes API** enabled.
+
+</Step>
+
+<Step title="Clone the Repository">
+
+Clone the project from GitHub and navigate into the API module:
+
+```bash
+git clone https://github.com/TdB-PlataformaRaizDoBem/raiz-do-bem-api.git
+cd raiz-do-bem-api
+```
+
+</Step>
+
+<Step title="Configure Environment Variables">
+
+The application reads four mandatory environment variables at startup. These map directly to the `application.properties` bindings shown below:
+
+```properties
+quarkus.datasource.username=${DB_USUARIO}
+quarkus.datasource.password=${DB_SENHA}
+quarkus.datasource.jdbc.url=${DB_URL}
+google-api-key=${GOOGLE_API_KEY}
+```
+
+Set them in your shell before running the application:
+
+<Tabs>
+  <Tab title="Linux / macOS">
     ```bash
-    your-cli start
+    export DB_URL="jdbc:oracle:thin:@//localhost:1521/XEPDB1"
+    export DB_USUARIO="<your_db_user>"
+    export DB_SENHA="<your_db_password>"
+    export GOOGLE_API_KEY="<your_google_api_key>"
     ```
-  </Step>
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    $env:DB_URL="jdbc:oracle:thin:@//localhost:1521/XEPDB1"
+    $env:DB_USUARIO="<your_db_user>"
+    $env:DB_SENHA="<your_db_password>"
+    $env:GOOGLE_API_KEY="<your_google_api_key>"
+    ```
+  </Tab>
+</Tabs>
+
+| Variable | Description |
+| :--- | :--- |
+| `DB_URL` | JDBC connection string for Oracle (e.g. `jdbc:oracle:thin:@//host:1521/service`). |
+| `DB_USUARIO` | Oracle database username. |
+| `DB_SENHA` | Oracle database password. |
+| `GOOGLE_API_KEY` | Google Cloud API key with the Routes API enabled for geographic matching. |
+
+<Warning>
+  Never commit these values to source control. Use a `.env` file or your CI/CD secrets manager to inject them safely in non-local environments.
+</Warning>
+
+</Step>
+
+<Step title="Run the API in Development Mode">
+
+Start the application using the bundled Maven Wrapper. Quarkus dev mode provides **live reload** — source changes are automatically recompiled and applied without restarting:
+
+<Tabs>
+  <Tab title="Linux / macOS">
+    ```bash
+    ./mvnw quarkus:dev
+    ```
+  </Tab>
+  <Tab title="Windows (PowerShell)">
+    ```powershell
+    .\mvnw.cmd quarkus:dev
+    ```
+  </Tab>
+</Tabs>
+
+Once startup is complete you will see a log line similar to:
+
+```text
+Listening on: http://0.0.0.0:8080
+Profile dev activated. Live Coding activated.
+```
+
+<Note>
+  The **Quarkus Dev UI** is available at `http://localhost:8080/q/dev-ui/` in dev mode. It provides live insight into CDI beans, configuration, cache state, and more — all without restarting the server.
+</Note>
+
+</Step>
+
+<Step title="Explore the Swagger UI">
+
+The OpenAPI documentation is always available at:
+
+```
+http://localhost:8080/q/swagger-ui/
+```
+
+The Swagger UI lists every endpoint, shows required roles, and lets you execute authenticated requests directly from the browser once you paste a Bearer token into the **Authorize** dialog.
+
+</Step>
+
+<Step title="Obtain a JWT Access Token">
+
+Authentication endpoints are public (`@PermitAll`) and require no token. Send your collaborator credentials to `POST /auth/tokenAcesso`:
+
+```bash
+curl -s -X POST http://localhost:8080/auth/tokenAcesso \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "colaborador@raizdobem.com.br",
+    "senha": "suaSenha123"
+  }'
+```
+
+A successful response returns an access token valid for **30 minutes**, a refresh token valid for **7 days**, and the token type:
+
+```json
+{
+  "token": "eyJhbGciOiJSUzI1NiJ9...",
+  "refreshToken": "eyJhbGciOiJSUzI1NiJ9...",
+  "tipo": "BearerToken"
+}
+```
+
+Copy the value of the `"token"` field — you will use it in the next step.
+
+<Note>
+  Tokens are signed with an RSA-256 key pair (`keyPrivada.pem` / `keyPublica.pem`). The issuer claim is `raiz-do-bem`, which the server validates on every protected request.
+</Note>
+
+</Step>
+
+<Step title="Make Your First Authenticated Request">
+
+Pass the access token as a `Bearer` token in the `Authorization` header. The example below lists beneficiaries using the paginated endpoint:
+
+```bash
+curl -s -X GET "http://localhost:8080/beneficiario?pagina=0&size=20" \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9..."
+```
+
+A successful response returns a paginated envelope:
+
+```json
+{
+  "conteudo": [ ... ],
+  "pagina": 0,
+  "tamanho": 20,
+  "totalElementos": 142,
+  "totalPaginas": 8
+}
+```
+
+You are now set up and making live calls to the Raiz do Bem API. Explore the full endpoint reference to manage dentists, appointments, help requests, and collaborators.
+
+</Step>
+
 </Steps>
-
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>

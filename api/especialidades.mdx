@@ -1,0 +1,106 @@
+---
+title: "Dental Specialties API: Browse Odontology Catalog"
+sidebarTitle: "Especialidades"
+description: "Public read-only endpoints to list all dental specialties and fetch a single specialty by ID — no authentication required for either endpoint."
+---
+
+The Especialidades API exposes the catalog of dental specialties that can be assigned to dentists registered in the Raiz do Bem platform. Both endpoints are annotated with `@PermitAll` in `EspecialidadeResource`, meaning **no JWT token is required** — they are fully public. The data is seeded at database initialization and is read-only at the API level; specialty records are managed directly in the database by system administrators. Typical specialties include areas such as Orthodontics, Pediatric Dentistry, Endodontics, and more.
+
+---
+
+## Endpoints
+
+### List All Specialties
+
+<ParamField path="GET /especialidades" type="endpoint" />
+
+Returns a flat array of all dental specialties available in the system. No authentication header is needed. This endpoint is commonly called during dentist registration to populate a specialty selection list on the front end.
+
+```bash
+curl https://api.raizdobem.org/especialidades
+```
+
+**Response — `200 OK`**
+
+<ResponseField name="id" type="number">
+  The unique numeric identifier for the specialty, seeded from the database.
+</ResponseField>
+
+<ResponseField name="descricao" type="string">
+  Human-readable description of the dental specialty (e.g. `"Ortodontia"`, `"Odontopediatria"`).
+</ResponseField>
+
+```json
+[
+  {
+    "id": 1,
+    "descricao": "Ortodontia"
+  },
+  {
+    "id": 2,
+    "descricao": "Odontopediatria"
+  },
+  {
+    "id": 3,
+    "descricao": "Endodontia"
+  },
+  {
+    "id": 4,
+    "descricao": "Periodontia"
+  },
+  {
+    "id": 5,
+    "descricao": "Cirurgia Bucomaxilofacial"
+  }
+]
+```
+
+---
+
+### Get Specialty by ID
+
+<ParamField path="GET /especialidades/{id}" type="endpoint" />
+
+Retrieves a single specialty by its numeric ID. No authentication is required. If no specialty exists for the given ID the server throws a `NaoEncontradoException`, which is mapped by `ExceptionsMapperGlobal` to a `404` response with an `ErroResponse` body.
+
+**Path parameter**
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the specialty to retrieve (e.g. `1`).
+</ParamField>
+
+```bash
+curl https://api.raizdobem.org/especialidades/1
+```
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": 1,
+  "descricao": "Ortodontia"
+}
+```
+
+**Response — `404 Not Found`**
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Especialidade com id 99 não encontrada!",
+  "timestamp": "2025-06-01T10:30:00"
+}
+```
+
+---
+
+## Security Summary
+
+| Endpoint | Method | Authentication Required |
+|---|---|---|
+| `/especialidades` | `GET` | No — `@PermitAll` |
+| `/especialidades/{id}` | `GET` | No — `@PermitAll` |
+
+<Note>
+  Because these endpoints are `@PermitAll`, client applications and public portals may call them freely without obtaining a JWT token first. This makes specialty data easily accessible for public-facing dentist search features.
+</Note>

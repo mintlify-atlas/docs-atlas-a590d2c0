@@ -1,0 +1,102 @@
+---
+title: "Social Programs API: NGO Program Catalog"
+sidebarTitle: "Programas Sociais"
+description: "Public read-only endpoints to list and retrieve the NGO's social programs — Dentista do Bem and Apolônias do Bem — without authentication."
+---
+
+The Programas Sociais API exposes the catalog of social programs run by the Raiz do Bem NGO. Both endpoints are annotated with `@PermitAll` in `ProgramaSocialResource`, meaning **no JWT token is required** — they are fully public. The two programs currently offered represent the core mission of the NGO: providing free dental care to vulnerable populations. Program records are seeded at database initialization and maintained by system administrators outside the API.
+
+---
+
+## About the Programs
+
+**Dentista do Bem** — Connects volunteer dentists with children and teenagers in social vulnerability, providing free orthodontic and preventive dental treatment. Beneficiaries enter this program after having a help-request (`PedidoAjuda`) approved by a collaborator.
+
+**Apolônias do Bem** — Focuses on women who are victims of domestic violence or living in social vulnerability. The program provides both dental treatment and psychological support, recognising that oral health is deeply connected to self-esteem and recovery.
+
+---
+
+## Endpoints
+
+### List All Social Programs
+
+<ParamField path="GET /programas-sociais" type="endpoint" />
+
+Returns all social programs registered in the platform. No authentication header is needed. Use the `id` returned here as `idProgramaSocial` when enrolling a beneficiary via `POST /beneficiario`.
+
+```bash
+curl https://api.raizdobem.org/programas-sociais
+```
+
+**Response — `200 OK`**
+
+<ResponseField name="id" type="number">
+  The unique numeric identifier for the program, seeded from the database.
+</ResponseField>
+
+<ResponseField name="programa" type="string">
+  Human-readable name of the social program.
+</ResponseField>
+
+```json
+[
+  {
+    "id": 1,
+    "programa": "Dentista do Bem"
+  },
+  {
+    "id": 2,
+    "programa": "Apolônias do Bem"
+  }
+]
+```
+
+---
+
+### Get Social Program by ID
+
+<ParamField path="GET /programas-sociais/{id}" type="endpoint" />
+
+Retrieves a single social program by its numeric ID. No authentication is required. If no program exists for the given ID, the server throws a `NaoEncontradoException`, which `ExceptionsMapperGlobal` maps to a `404` response with an `ErroResponse` body.
+
+**Path parameter**
+
+<ParamField path="id" type="integer" required>
+  Numeric ID of the social program to retrieve (e.g. `1`).
+</ParamField>
+
+```bash
+curl https://api.raizdobem.org/programas-sociais/1
+```
+
+**Response — `200 OK`**
+
+```json
+{
+  "id": 1,
+  "programa": "Dentista do Bem"
+}
+```
+
+**Response — `404 Not Found`**
+
+```json
+{
+  "statusCode": 404,
+  "mensagem": "Programa social com id 99 não encontrado.",
+  "timestamp": "2025-06-01T10:30:00"
+}
+```
+
+---
+
+## Security Summary
+
+| Endpoint | Method | Authentication Required |
+|---|---|---|
+| `/programas-sociais` | `GET` | No — `@PermitAll` |
+| `/programas-sociais/{id}` | `GET` | No — `@PermitAll` |
+
+<Note>
+  Because these endpoints are `@PermitAll`, they can be embedded in public-facing onboarding flows and help-request forms (e.g. `POST /pedido-ajuda`) without requiring the end-user to hold a system account.
+</Note>
